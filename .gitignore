@@ -12,6 +12,12 @@
 !/extensions/auto-compact/controller.test.mjs
 !/extensions/auto-compact/verify-integration.mjs
 !/extensions/auto-compact/README.md
+!/extensions/powerline-footer/
+!/extensions/powerline-footer/theme.json
+!/themes/
+!/themes/ci_dark.json
+!/themes/README.md
+!/themes/verify.mjs
 !/skills/
 !/skills/sync-pi-config/
 !/skills/sync-pi-config/SKILL.md

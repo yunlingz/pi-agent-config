@@ -1,4 +1,5 @@
 {
+  "theme": "ci_dark",
   "defaultProvider": "existing_gateway",
   "defaultModel": "gpt-latest",
   "defaultThinkingLevel": "max",
