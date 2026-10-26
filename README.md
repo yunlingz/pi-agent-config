@@ -30,6 +30,8 @@ Global npm package versions are pinned in `settings.json`; downloaded packages a
 
 The local [auto-compact extension](extensions/auto-compact/README.md) compacts before `/quit` and after 30 minutes of inactivity in interactive sessions. It waits for Pi-managed work, preserves native compaction settings, and keeps Pi open if pre-quit compaction fails. Run `/reload` to activate it.
 
+The local [cache-rate item](extensions/cache-rate/README.md) replaces Powerline's native cache percentage through its supported custom-status API. It includes cache writes in the total input denominator, displays one decimal place, and preserves the existing cache slot without patching installed packages.
+
 Autoformat and web-search extensions are not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
 
 ## Theme
@@ -56,7 +58,7 @@ No Codex skills, extensions, MCP servers, sessions, or other Codex settings were
 
 Run `/reload` after adding or editing skills or instructions. Invoke `/skill:sync-pi-config` to run its regression tests, check the currently installed Pi's JSON schemas and skill discovery, and start a real read-only agent session in a disposable OS temporary directory with `--no-mcp`. It checks the required global MCP-disable setting before starting the session, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
 
-`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact extension's source/tests/docs, the ci_dark theme/checks/docs and Powerline color override, and the explicit `sync-pi-config` and `mcp-free-tools` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
+`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact and cache-rate extensions' source/tests/docs, the ci_dark theme/checks/docs and Powerline color override, and the explicit `sync-pi-config` and `mcp-free-tools` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
 
 ```text
 git -C ~/.pi/agent diff --cached

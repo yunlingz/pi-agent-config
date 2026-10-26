@@ -15,7 +15,28 @@
     "preset": "default",
     "welcome": false,
     "git": { "polling": "branch" },
-    "cache_read": { "format": "both" },
+    "disabledSegments": ["cache_read"],
+    "customItems": [
+      {
+        "id": "cache_rate",
+        "statusKey": "cache-rate",
+        "position": "left",
+        "color": "muted"
+      }
+    ],
+    "layout": {
+      "left": [
+        "model",
+        "thinking",
+        "shell_mode",
+        "path",
+        "git",
+        "queue",
+        "context_pct",
+        "custom:cache_rate",
+        "cost"
+      ]
+    },
     "queue": { "compactPromptMode": "native" },
     "autoFollowUp": false
   }

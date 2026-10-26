@@ -12,6 +12,12 @@
 !/extensions/auto-compact/controller.test.mjs
 !/extensions/auto-compact/verify-integration.mjs
 !/extensions/auto-compact/README.md
+!/extensions/cache-rate/
+!/extensions/cache-rate/index.ts
+!/extensions/cache-rate/cache-rate.mjs
+!/extensions/cache-rate/cache-rate.test.mjs
+!/extensions/cache-rate/verify-integration.mjs
+!/extensions/cache-rate/README.md
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
 !/themes/
