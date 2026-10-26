@@ -1,0 +1,6 @@
+{
+  "defaultProvider": "existing_gateway",
+  "defaultModel": "gpt-latest",
+  "defaultThinkingLevel": "max",
+  "lastChangelogVersion": "1.3.0"
+}

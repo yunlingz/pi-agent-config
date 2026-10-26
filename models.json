@@ -1,0 +1,21 @@
+{
+  "providers": {
+    "existing_gateway": {
+      "baseUrl": "http://127.0.0.1:48081",
+      "api": "openai-responses",
+      "authHeader": true,
+      "models": [
+        {
+          "id": "gpt-latest",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "xhigh": "xhigh",
+            "max": "max"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 872000
+        }
+      ]
+    }
+  }
+}

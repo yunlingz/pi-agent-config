@@ -1,0 +1,7 @@
+# Track reviewed configuration only; credentials and runtime data stay local.
+*
+!.gitignore
+!AGENTS.md
+!models.json
+!settings.json
+!README.md
