@@ -28,6 +28,8 @@ Global npm package versions are pinned in `settings.json`; downloaded packages a
 - `@juicesharp/rpiv-ask-user-question`: structured choices when the agent needs clarification; the tool is omitted in non-interactive runs.
 - `pi-powerline-footer`: model, thinking, context, token, and Git information; `/powerline` controls the display. AI-generated vibes, automatic follow-up classification, and the welcome overlay are off. Git polling is branch-only, and `/compact` keeps Pi's native meaning.
 
+The local [auto-compact extension](extensions/auto-compact/README.md) compacts before `/quit` and after 30 minutes of inactivity in interactive sessions. It waits for Pi-managed work, preserves native compaction settings, and keeps Pi open if pre-quit compaction fails. Run `/reload` to activate it.
+
 Autoformat and web-search extensions are not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
 
 ## Model and credentials
@@ -50,7 +52,7 @@ No Codex skills, extensions, MCP servers, sessions, or other Codex settings were
 
 Run `/reload` after adding or editing skills or instructions. Invoke `/skill:sync-pi-config` to run its regression tests, check the currently installed Pi's JSON schemas and skill discovery, and start a real read-only agent session in a disposable OS temporary directory with `--no-mcp`. It checks the required global MCP-disable setting before starting the session, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
 
-`.gitignore` allows only the reviewed configuration, these instructions, this README, and the explicit `sync-pi-config` and `mcp-free-tools` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
+`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact extension's source/tests/docs, and the explicit `sync-pi-config` and `mcp-free-tools` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
 
 ```text
 git -C ~/.pi/agent diff --cached
