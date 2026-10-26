@@ -1,5 +1,9 @@
 # Global instructions
 
+## Communicate in English
+
+- The user may communicate in any language. Always use English for all assistant-authored session content and replies, including session titles, task labels, progress updates, clarification questions, and final answers.
+
 ## Keep progress visible
 
 - Before starting a potentially slow command or script, briefly explain what it will do.
