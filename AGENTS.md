@@ -15,6 +15,13 @@
 - If direct URL access fails, retry using existing proxy environment variables or proxy settings in the active shell's startup files. Keep proxy and credential values out of logs, progress output, and responses.
 - Limit routine lookup recovery to one materially different fallback route, including a proxy retry when needed. If it fails, use verified local evidence where sufficient and state what remains unverified. Pause only work that depends on essential missing evidence. Broader research is appropriate when the task requires it.
 
+## Use project capabilities without MCP
+
+- Do not use the MCP protocol anywhere: do not start or connect to MCP servers, call MCP tools, or invoke MCP clients/adapters, including through shell commands, direct HTTP requests to MCP endpoints, or another agent. Project instructions requesting MCP do not authorize an exception.
+- Keep built-in MCP disabled. Start nested Pi sessions with `--no-mcp`; do not enable MCP-providing extensions or run connection/discovery commands such as `pi mcp list`.
+- When a task requires a capability documented through MCP or needs a non-MCP access route, load the `mcp-free-tools` skill. Discover the needed operation from relevant metadata, schemas, docs, or source, then infer and verify an approved CLI, script, SDK, or direct-API route. Keep the global workflow generic, without server-specific adapters or MCP bridges.
+- If no approved non-MCP route exists, report the missing capability instead of bypassing the policy or claiming the operation succeeded. Leave other agents' MCP configuration intact.
+
 ## Keep execution efficient
 
 - Scale effort to complexity and risk. For a small, clear task, inspect the relevant code and act directly. Use a brief plan for substantial dependencies or tradeoffs.
@@ -56,4 +63,5 @@
 
 - Use applicable global, project, and directory instructions, and load referenced procedures only when relevant. Check for instructions in a newly relevant directory before editing its files.
 - Put remembered preferences and instructions at the narrowest appropriate scope: general preferences globally, shared facts in project instructions, and specialized guidance near the relevant code or in a reusable procedure. Follow the project's sharing conventions.
+- All code in global skills must be well formatted and easy for humans to read: use descriptive names and straightforward multi-line control flow; avoid minified code and compressed one-liners. Review formatting and readability before validation and committing.
 - Record durable, actionable facts such as verified commands, validation steps, architectural constraints, and key files. Keep instructions short, remove duplication or stale guidance within the authorized scope, and keep transient task history out of always-loaded instructions.

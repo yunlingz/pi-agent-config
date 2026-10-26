@@ -10,3 +10,6 @@
 !/skills/sync-pi-config/SKILL.md
 !/skills/sync-pi-config/scripts/
 !/skills/sync-pi-config/scripts/verify.mjs
+!/skills/sync-pi-config/scripts/verify.test.mjs
+!/skills/mcp-free-tools/
+!/skills/mcp-free-tools/SKILL.md
