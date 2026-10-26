@@ -1,6 +1,6 @@
 # Pi configuration
 
-This directory is both Pi's default user configuration directory and a local Git repository. Configuration changes are staged for review; no commit or remote is required.
+This directory is both Pi's default user configuration directory and a local Git repository. Use `/skill:sync-pi-config` to verify and commit reviewed configuration changes locally; no remote or push is required.
 
 ## Run
 
@@ -30,7 +30,11 @@ The redundant single-agent rules were removed. Codex execution-cell, yield, sess
 
 No Codex skills, extensions, MCP servers, sessions, or other Codex settings were migrated.
 
-`.gitignore` allows only the reviewed configuration, these instructions, and this README into version control. Credentials, sessions, caches, and other runtime files remain local. Add an explicit ignore exception if you later decide to track another configuration file.
+## Sync configuration
+
+Run `/reload` after adding or editing the skill, then invoke `/skill:sync-pi-config`. The skill checks the currently installed Pi's JSON schemas and skill discovery, runs a real read-only agent session in a disposable OS temporary directory, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
+
+`.gitignore` allows only the reviewed configuration, these instructions, this README, and the explicit `sync-pi-config` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
 
 ```text
 git -C ~/.pi/agent diff --cached

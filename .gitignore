@@ -5,3 +5,8 @@
 !models.json
 !settings.json
 !README.md
+!/skills/
+!/skills/sync-pi-config/
+!/skills/sync-pi-config/SKILL.md
+!/skills/sync-pi-config/scripts/
+!/skills/sync-pi-config/scripts/verify.mjs
