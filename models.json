@@ -1,7 +1,7 @@
 {
   "providers": {
     "existing_gateway": {
-      "baseUrl": "http://127.0.0.1:48081",
+      "baseUrl": "http://127.0.0.1:48080",
       "api": "openai-responses",
       "authHeader": true,
       "models": [
@@ -12,7 +12,10 @@
             "xhigh": "xhigh",
             "max": "max"
           },
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 872000
         }
       ]
