@@ -9,7 +9,12 @@
           "id": "gpt-latest",
           "reasoning": true,
           "thinkingLevelMap": {
-            "xhigh": "xhigh",
+            "off": null,
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": null,
+            "xhigh": null,
             "max": "max"
           },
           "input": [
@@ -18,6 +23,25 @@
           ],
           "contextWindow": 1050000,
           "maxTokens": 128000
+        },
+        {
+          "id": "grok-latest",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": null,
+            "xhigh": null,
+            "max": "xhigh"
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 500000,
+          "maxTokens": 64000
         }
       ]
     }

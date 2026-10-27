@@ -2,12 +2,18 @@
   "theme": "ci_dark",
   "defaultProvider": "existing_gateway",
   "defaultModel": "gpt-latest",
-  "enabledModels": ["existing_gateway/gpt-latest"],
+  "enabledModels": [
+    "existing_gateway/gpt-latest",
+    "existing_gateway/grok-latest"
+  ],
   "defaultThinkingLevel": "max",
   "compaction": {
     "modelOverrides": {
       "existing_gateway/gpt-latest": {
         "reserveTokens": 192000
+      },
+      "existing_gateway/grok-latest": {
+        "reserveTokens": 96000
       }
     }
   },
