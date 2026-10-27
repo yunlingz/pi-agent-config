@@ -16,7 +16,8 @@
             "text",
             "image"
           ],
-          "contextWindow": 872000
+          "contextWindow": 1050000,
+          "maxTokens": 128000
         }
       ]
     }

@@ -10,6 +10,7 @@
 !/extensions/auto-compact/index.ts
 !/extensions/auto-compact/controller.mjs
 !/extensions/auto-compact/controller.test.mjs
+!/extensions/auto-compact/verify-summary-integration.mjs
 !/extensions/auto-compact/verify-integration.mjs
 !/extensions/auto-compact/README.md
 !/extensions/cache-rate/

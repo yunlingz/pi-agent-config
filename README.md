@@ -28,7 +28,7 @@ Global npm package versions are pinned in `settings.json`; downloaded packages a
 - `@juicesharp/rpiv-ask-user-question`: structured choices when the agent needs clarification; the tool is omitted in non-interactive runs.
 - `pi-powerline-footer`: model, thinking, context, token, and Git information; `/powerline` controls the display. AI-generated vibes, automatic follow-up classification, and the welcome overlay are off. Git polling is branch-only, and `/compact` keeps Pi's native meaning.
 
-The local [auto-compact extension](extensions/auto-compact/README.md) compacts before `/quit` and after 30 minutes of inactivity in interactive sessions. It waits for Pi-managed work, preserves native compaction settings, and keeps Pi open if pre-quit compaction fails. Run `/reload` to activate it.
+The local [auto-compact extension](extensions/auto-compact/README.md) compacts before `/quit` and after 30 minutes of inactivity in interactive sessions. It decides when to invoke Pi's native compactor, waits for Pi-managed work, and keeps Pi open if pre-quit compaction fails. The selected model, reasoning level and native output/retention budgets are unchanged. A native incomplete-summary failure needs a Pi compactor/provider fix, not a timing-policy override. Run `/reload` to activate it.
 
 The local [cache-rate item](extensions/cache-rate/README.md) replaces Powerline's native cache percentage through its supported custom-status API. It includes cache writes in the total input denominator, displays one decimal place, and preserves the existing cache slot without patching installed packages.
 
@@ -40,9 +40,9 @@ The default theme is [ci_dark](themes/README.md), adapted from your iTerm palett
 
 ## Model and credentials
 
-`settings.json` selects `existing_gateway/gpt-latest` with `max` reasoning effort. `models.json` uses the same Responses API gateway as Codex, at `http://127.0.0.1:48081`, with text/image input and an explicit hard context limit of 872,000 tokens. The thinking map enables `xhigh` and `max` for this custom model ID.
+`settings.json` selects `existing_gateway/gpt-latest` with `max` reasoning effort. `models.json` uses the same Responses API gateway as Codex, at `http://127.0.0.1:48081`, with text/image input, a configured context window of 1,050,000 tokens and maximum output allowance of 128,000. The thinking map enables `xhigh` and `max` for this custom model ID.
 
-Compaction uses Pi's defaults, with no overrides: automatic compaction is enabled, 16,384 tokens are reserved, and 20,000 recent tokens are retained. With this context limit, the default threshold is above approximately 855,616 context tokens. Codex's 820,000-token trigger is not migrated. The output limit also uses Pi's default for a custom model.
+Automatic compaction is enabled. A native `compaction.modelOverrides` entry reserves 192,000 tokens for `existing_gateway/gpt-latest`: 128,000 for output plus 64,000 extra headroom below the approximately 922,000-token usable-input ceiling observed upstream. The nominal threshold is above 858,000 context tokens; native checks and overflow recovery still govern actual timing. Recent-history retention remains at Pi's 20,000-token default, and other models retain the default 16,384-token reserve. Codex's 820,000-token trigger is not migrated. These are native configuration values, not auto-compact plugin overrides.
 
 The gateway must already be running, as it does for Codex. Its credential was copied once into Pi's private `auth.json`; it is excluded from Git. Rotate that credential separately if the server credential changes.
 
