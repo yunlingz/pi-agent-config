@@ -73,7 +73,9 @@ The gateway must already be running, as it does for Codex. Its credential was co
 
 ## Instructions and version control
 
-`AGENTS.md` retains portable preferences from the Codex global instructions: visible progress, bounded network requests, efficient changes, focused context, Node.js helpers on Windows, understanding code before edits, verification, and scoped reusable guidance.
+`AGENTS.md` retains portable preferences from the Codex global instructions.
+These cover visible progress, bounded network requests, efficient changes, focused context, code inspection before edits, verification, and scoped reusable guidance.
+Temporary helpers and command orchestration use JavaScript and Node.js on every platform.
 
 The redundant single-agent rules were removed. Codex execution-cell, yield, session-handle, and shell-parameter instructions were replaced with guidance appropriate to Pi's command tools. Progress updates account for blocking tool calls.
 
