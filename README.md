@@ -20,6 +20,12 @@ Git Bash is discovered automatically from the existing Git for Windows installat
 
 When a task references project MCP tools, use `/skill:mcp-free-tools` for generic capability discovery from relevant metadata, schemas, documentation, or source, followed by inference and verification of an approved CLI, script, SDK, or direct API. The global skill contains no server-specific adapter logic, does not launch MCP or import credentials, and reports a capability gap when no non-MCP route can be established. Other agents' MCP configuration remains untouched. Keep project-specific mappings in project docs/scripts/skills and global guidance genuinely cross-project.
 
+## English STE communication
+
+The global [ste skill](skills/ste/README.md) defines a concise, evidence-based English style for technical replies. `AGENTS.md` loads it by default in every session. It puts key information first, separates work status from verification, and requires evidence for task-specific claims. It changes user-facing prose, not project artifacts, and does not claim ASD-STE100 compliance.
+
+Run `/reload`, then `/skill:ste` to enable it in an existing session. Say `stop ste` to stop the style for the current session; `/skill:ste` enables it again. Exact user output formats still take precedence. No extension or dependency is required.
+
 ## Installed extensions
 
 Global npm package versions are pinned in `settings.json`; downloaded packages and runtime state remain ignored by Git.
@@ -58,7 +64,7 @@ No Codex skills, extensions, MCP servers, sessions, or other Codex settings were
 
 Run `/reload` after adding or editing skills or instructions. Invoke `/skill:sync-pi-config` to run its regression tests, check the currently installed Pi's JSON schemas and skill discovery, and start a real read-only agent session in a disposable OS temporary directory with `--no-mcp`. It checks the required global MCP-disable setting before starting the session, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
 
-`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact and cache-rate extensions' source/tests/docs, the ci_dark theme/checks/docs and Powerline color override, and the explicit `sync-pi-config` and `mcp-free-tools` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
+`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact and cache-rate extensions' source/tests/docs, the ci_dark theme/checks/docs and Powerline color override, and the explicit `sync-pi-config`, `mcp-free-tools`, and `ste` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
 
 ```text
 git -C ~/.pi/agent diff --cached

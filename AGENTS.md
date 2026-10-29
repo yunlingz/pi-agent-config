@@ -4,6 +4,12 @@
 
 - The user may communicate in any language. Always use English for all assistant-authored session content and replies, including session titles, task labels, progress updates, clarification questions, and final answers.
 
+## Use English STE for user-facing replies
+
+- At session start, read the `ste` skill at its advertised location and its required reference before the first user-facing reply. Use its English reporting style throughout the session.
+- `stop ste` disables only this style for the current session; `/skill:ste` enables it again. Preserve the active/opt-out state in compaction and handoff summaries. Do not reload the skill after an explicit opt-out unless the user re-enables it.
+- This style governs user-facing prose, not project artifacts. Explicit user output formats and higher-priority instructions take precedence.
+
 ## Keep progress visible
 
 - Before starting a potentially slow command or script, briefly explain what it will do.
