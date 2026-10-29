@@ -22,9 +22,22 @@ When a task references project MCP tools, use `/skill:mcp-free-tools` for generi
 
 ## English STE communication
 
-The global [ste skill](skills/ste/README.md) defines a concise, evidence-based English style for technical replies. `AGENTS.md` requires it for every user-facing reply in every session. It puts key information first, separates work status from verification, and requires evidence for task-specific claims. Reply checks scale with complexity and risk; all writing rules still apply. The style changes user-facing prose, not project artifacts, and does not claim ASD-STE100 compliance.
+The writing policy is at the top of [AGENTS.md](AGENTS.md#use-english-ste).
+It contains all 25 requirements, status meanings, and review instructions.
+STE applies to every reply and to updates of global `AGENTS.md` and global skills.
+For global skills, it covers instructions, documentation, examples, and explanatory comments.
+Style edits preserve executable behavior, commands, schemas, identifiers, quoted text, and license notices.
+Other project artifacts follow the requested format and project conventions.
 
-STE is always active, including after reloads, compaction, and handoffs. There is no session disable command. Run `/reload` to refresh global instructions in an existing session; `/skill:ste` reloads the skill rules. Exact user output formats still take precedence. No extension or dependency is required.
+STE stays active across reloads, compaction, and handoffs.
+There is no session disable command.
+Run `/reload` to refresh global instructions in an existing session.
+There is no standalone STE skill or extra reference to load.
+Exact output formats still take precedence.
+No extension or dependency is required.
+
+This is a practical writing policy, not a claim of formal STE compliance or certification.
+The STE-derived guidance retains its [MIT license notice](licenses/ste/LICENSE).
 
 ## Installed extensions
 
@@ -70,7 +83,11 @@ No Codex skills, extensions, MCP servers, sessions, or other Codex settings were
 
 Run `/reload` after adding or editing skills or instructions. Invoke `/skill:sync-pi-config` to run its regression tests, check the currently installed Pi's JSON schemas and skill discovery, and start a real read-only agent session in a disposable OS temporary directory with `--no-mcp`. It checks the required global MCP-disable setting before starting the session, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
 
-`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact and cache-rate extensions' source/tests/docs, the ci_dark theme/checks/docs and Powerline color override, and the explicit `sync-pi-config`, `mcp-free-tools`, `ste`, and `upgrade-pi-extensions` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
+`.gitignore` tracks only reviewed configuration, documentation, local extensions, themes, and explicitly listed global skill files.
+The tracked global skills are `sync-pi-config`, `mcp-free-tools`, and `upgrade-pi-extensions`.
+The retained STE license is also tracked.
+Credentials, sessions, caches, and other runtime files remain local.
+Add a narrow ignore exception before tracking another configuration file.
 
 ```text
 git -C ~/.pi/agent diff --cached

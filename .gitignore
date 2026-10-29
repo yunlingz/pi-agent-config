@@ -5,6 +5,9 @@
 !models.json
 !settings.json
 !README.md
+!/licenses/
+!/licenses/ste/
+!/licenses/ste/LICENSE
 !/extensions/
 !/extensions/auto-compact/
 !/extensions/auto-compact/index.ts
@@ -33,15 +36,6 @@
 !/skills/sync-pi-config/scripts/verify.test.mjs
 !/skills/mcp-free-tools/
 !/skills/mcp-free-tools/SKILL.md
-!/skills/ste/
-!/skills/ste/SKILL.md
-!/skills/ste/README.md
-!/skills/ste/LICENSE
-!/skills/ste/references/
-!/skills/ste/references/terminology.md
-!/skills/ste/examples/
-!/skills/ste/examples/result-report.md
-!/skills/ste/examples/task-summary.md
 !/skills/upgrade-pi-extensions/
 !/skills/upgrade-pi-extensions/SKILL.md
 !/skills/upgrade-pi-extensions/README.md

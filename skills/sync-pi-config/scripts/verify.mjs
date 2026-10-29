@@ -170,7 +170,8 @@ async function runSession(packageDir, packageInfo, agentDir, cwd, onRecord) {
     pending += chunk;
     let newlineIndex;
 
-    // Split only on LF: readline also splits Unicode separators inside JSON strings.
+    // Split only on line feed (LF).
+    // `readline` also splits Unicode separators inside JSON strings.
     while ((newlineIndex = pending.indexOf('\n')) !== -1) {
       const line = pending.slice(0, newlineIndex).replace(/\r$/, '');
       pending = pending.slice(newlineIndex + 1);
