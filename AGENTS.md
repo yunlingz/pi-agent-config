@@ -6,8 +6,9 @@
 
 ## Use English STE for user-facing replies
 
-- At session start, read the `ste` skill at its advertised location and its required reference before the first user-facing reply. Use its English reporting style throughout the session.
-- `stop ste` disables only this style for the current session; `/skill:ste` enables it again. Preserve the active/opt-out state in compaction and handoff summaries. Do not reload the skill after an explicit opt-out unless the user re-enables it.
+- STE is mandatory for every user-facing reply in every session. At session start, read the `ste` skill at its advertised location and its required reference before the first user-facing reply.
+- Keep STE active across reloads, compaction, and handoffs. There is no session disable command. Preserve this always-active requirement in compaction and handoff summaries.
+- Before every reply, complete the skill's full pre-send review. Correct rule violations before sending; short sentences alone are not sufficient.
 - This style governs user-facing prose, not project artifacts. Explicit user output formats and higher-priority instructions take precedence.
 
 ## Keep progress visible

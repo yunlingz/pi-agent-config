@@ -22,9 +22,9 @@ When a task references project MCP tools, use `/skill:mcp-free-tools` for generi
 
 ## English STE communication
 
-The global [ste skill](skills/ste/README.md) defines a concise, evidence-based English style for technical replies. `AGENTS.md` loads it by default in every session. It puts key information first, separates work status from verification, and requires evidence for task-specific claims. It changes user-facing prose, not project artifacts, and does not claim ASD-STE100 compliance.
+The global [ste skill](skills/ste/README.md) defines a concise, evidence-based English style for technical replies. `AGENTS.md` requires it for every user-facing reply in every session. It puts key information first, separates work status from verification, and requires evidence for task-specific claims. Every reply requires a full pre-send review. The style changes user-facing prose, not project artifacts, and does not claim ASD-STE100 compliance.
 
-Run `/reload`, then `/skill:ste` to enable it in an existing session. Say `stop ste` to stop the style for the current session; `/skill:ste` enables it again. Exact user output formats still take precedence. No extension or dependency is required.
+STE is always active, including after reloads, compaction, and handoffs. There is no session disable command. Run `/reload` to refresh global instructions in an existing session; `/skill:ste` reloads the skill rules. Exact user output formats still take precedence. No extension or dependency is required.
 
 ## Installed extensions
 

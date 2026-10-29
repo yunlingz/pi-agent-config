@@ -12,6 +12,7 @@ Use it directly in Pi; no other project or tool is required.
 - Give numbered options when the user must decide. Recommend an option only when the facts support it.
 - Use flexible patterns for progress, results, diagnosis, decisions, and multi-item summaries.
 - Keep simple answers simple. Do not force headings or status labels onto every reply.
+- Review every draft against the full rule set before sending. Correct violations instead of checking sentence length alone.
 
 ## English writing
 
@@ -28,27 +29,27 @@ Explicit output formats take precedence. JSON-only output remains JSON-only.
 ## Use
 
 The skill is installed at `~/.pi/agent/skills/ste/SKILL.md`.
-The global `~/.pi/agent/AGENTS.md` instructs Pi to load it at the start of each session.
+The global `~/.pi/agent/AGENTS.md` requires it for every user-facing reply in every session.
+Pi must read the skill and its terminology reference before the first reply.
 
-- Start a new Pi session to use the default style.
-- In an existing session, run `/reload`, then `/skill:ste` to enable it explicitly.
-- Use `/skill:ste <request>` to apply the skill to a request.
-- Say `stop ste` to stop the style for the current session.
-- Invoke `/skill:ste` or explicitly request STE style to enable it again.
+- Start a new Pi session to load the current global instructions.
+- In an existing session, run `/reload` to refresh the instructions.
+- Use `/skill:ste` to reload the skill rules when needed.
+- Use `/skill:ste <request>` to include a request with the skill rules.
 
-Stopping the style does not change the global English-language instruction or other policies.
-It does not edit persistent configuration.
+STE is always active. There is no session disable command.
+Reloads, compaction, and handoffs must preserve this requirement.
+The model must complete the full pre-send review before every reply.
 No extension, dependency, executable, or MCP connection is required.
 
 The skill relies on the model following instructions; it is not a programmatic formatter or compliance checker.
-If the style is lost after compaction, invoke `/skill:ste` again unless you intentionally opted out.
-To make activation optional in future sessions, remove the **Use English STE for user-facing replies** section from the global `AGENTS.md`.
+The required review covers the complete rule set, not just sentence length.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| [SKILL.md](SKILL.md) | Activation, scope, writing rules, reply patterns, and self-check. |
+| [SKILL.md](SKILL.md) | Always-active scope, writing rules, reply patterns, and required pre-send review. |
 | [references/terminology.md](references/terminology.md) | Status meanings, evidence boundaries, modal words, and concrete English. |
 | [examples/result-report.md](examples/result-report.md) | Before/after report and edge cases for failure, missing evidence, hypotheses, and exact output. |
 | [examples/task-summary.md](examples/task-summary.md) | Requirements summary and a decision example. |

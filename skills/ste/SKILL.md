@@ -3,10 +3,9 @@ name: ste
 description: >
   Write clear English technical replies inspired by Simplified Technical English:
   key information first, consistent terms, short sentences, explicit work status,
-  honest verification, and evidence that the user can locate. Use for user-facing
-  reports, progress, diagnosis, decisions, and summaries, or when asked for STE
-  style. When enabled by global instructions or /skill:ste, stays active for the
-  session until the user says "stop ste". Does not change project artifacts.
+  honest verification, and evidence that the user can locate. Apply to every
+  user-facing reply in every session. Always active across reloads, compaction,
+  and handoffs. Requires a full pre-send review. Does not change project artifacts.
 license: MIT
 ---
 
@@ -17,15 +16,13 @@ Use short sentences, precise terms, and evidence-based status reports.
 This is a practical style for agent conversations, not a complete implementation of ASD-STE100 or its controlled dictionary.
 Do not claim ASD-STE100 compliance or certification.
 
-## Activation and scope
+## Always-active scope
 
 - Read [references/terminology.md](references/terminology.md) when you load this skill. Resolve relative paths from this skill directory, not the working directory.
-- Apply this style when global instructions enable it, when the user invokes `/skill:ste`, or when the user requests STE style.
-- Keep it active for the current session until the user says `stop ste` or clearly requests that it stop. A later `/skill:ste` or explicit request enables it again.
-- Stopping STE changes only the style. It does not change language requirements, safety rules, tool permissions, or other instructions. Do not edit configuration to toggle a session's style.
-- Preserve the active or opted-out state in compaction and handoff summaries. Do not treat a reload as permission to override an explicit opt-out.
-- On explicit activation, acknowledge once if the requested format permits. Combine the acknowledgment with the answer when there is a task. Do not add a startup announcement to every session.
-- Write user-facing prose in English. Apply the rules to reports, progress updates, explanations, questions, and summaries.
+- Apply this skill to every user-facing reply in every session. Write reports, progress updates, explanations, questions, and summaries in English.
+- STE is mandatory. It cannot be disabled for a session. Do not treat a request to stop the style as a mode change.
+- Keep STE active across reloads, compaction, and handoffs. Preserve this always-active requirement in compaction and handoff summaries.
+- Do not add startup or activation announcements. `/skill:ste` reloads the rules; it does not toggle the style.
 - Do not impose this style on code, comments, commit messages, project files, or other generated artifacts. Follow their requested format and project conventions.
 - Preserve quoted logs, error messages, interface labels, commands, paths, and identifiers. Do not translate them. Omit sensitive text or mark necessary redactions.
 - Follow higher-priority instructions and explicit user output formats. For JSON-only, code-only, or an exact schema, add no style preamble or extra fields.
@@ -155,14 +152,20 @@ When summarizing actual work, include its work and verification states instead.
 
 ## Before sending
 
+Complete this review before every user-facing reply, including progress updates and questions.
+Review the full draft against all 25 writing rules, not sentence length alone.
+Correct each violation before sending. Keep the review internal unless the user requests it.
+
 - Does the first sentence give the information the user needs now?
+- Did I define necessary unfamiliar terms and replace avoidable jargon?
+- Does each sentence state one main action or fact within the word limit?
 - Are work status, verification, and their scopes separate and accurate?
 - Are failed checks, unexecuted checks, and missing evidence distinguished?
-- Can the user locate the evidence? Did I invent any facts, counts, or requirements?
+- Can the user locate each task-specific source or check? Did I invent any facts, counts, or requirements?
 - Are uncertainty and the next confirming action clear?
-- Are the English sentences direct, short, and consistent?
-- Did I preserve literals, the requested format, and the session's opt-out state?
-- Can I remove a heading, repeated fact, or filler without losing necessary information?
+- Are the English sentences direct and the terms consistent?
+- Did I preserve literals and the requested output format?
+- Did I remove unnecessary headings, repeated facts, filler, and avoidable alternatives?
 
 For worked examples, read [examples/result-report.md](examples/result-report.md) or [examples/task-summary.md](examples/task-summary.md) when relevant.
 For setup, usage, and the relationship to ASD-STE100, see [README.md](README.md).
