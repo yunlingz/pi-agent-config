@@ -5,7 +5,8 @@ description: >
   key information first, consistent terms, short sentences, explicit work status,
   honest verification, and evidence that the user can locate. Apply to every
   user-facing reply in every session. Always active across reloads, compaction,
-  and handoffs. Requires a full pre-send review. Does not change project artifacts.
+  and handoffs. Uses a brief pre-send check, with deeper review for complex or
+  high-risk replies. All writing rules remain mandatory. Does not change project artifacts.
 license: MIT
 ---
 
@@ -19,6 +20,7 @@ Do not claim ASD-STE100 compliance or certification.
 ## Always-active scope
 
 - Read [references/terminology.md](references/terminology.md) when you load this skill. Resolve relative paths from this skill directory, not the working directory.
+- Reuse the loaded instructions and reference for the session. Reload them only after changes or when their contents are unavailable.
 - Apply this skill to every user-facing reply in every session. Write reports, progress updates, explanations, questions, and summaries in English.
 - STE is mandatory. It cannot be disabled for a session. Do not treat a request to stop the style as a mode change.
 - Keep STE active across reloads, compaction, and handoffs. Preserve this always-active requirement in compaction and handoff summaries.
@@ -152,20 +154,20 @@ When summarizing actual work, include its work and verification states instead.
 
 ## Before sending
 
-Complete this review before every user-facing reply, including progress updates and questions.
-Review the full draft against all 25 writing rules, not sentence length alone.
-Correct each violation before sending. Keep the review internal unless the user requests it.
+Apply all 25 writing rules while drafting. Do not routinely rewrite a complete answer solely to apply STE.
+Before every reply, make one brief internal check of the applicable rules. Correct identified violations before sending.
+All 25 rules remain mandatory; review depth does not change the requirements.
 
-- Does the first sentence give the information the user needs now?
-- Did I define necessary unfamiliar terms and replace avoidable jargon?
-- Does each sentence state one main action or fact within the word limit?
-- Are work status, verification, and their scopes separate and accurate?
-- Are failed checks, unexecuted checks, and missing evidence distinguished?
-- Can the user locate each task-specific source or check? Did I invent any facts, counts, or requirements?
-- Are uncertainty and the next confirming action clear?
-- Are the English sentences direct and the terms consistent?
-- Did I preserve literals and the requested output format?
-- Did I remove unnecessary headings, repeated facts, filler, and avoidable alternatives?
+- Does the reply address the current request without unnecessary detail?
+- Are terms clear and sentence limits satisfied?
+- Are meaning, literals, and the requested output format preserved?
+- Are factual claims supported, with accurate status and clear uncertainty?
+
+Use a deeper review for complex explanations, diagnoses, completion reports, decisions, and high-risk instructions.
+Check the applicable rules in detail, especially evidence, status, uncertainty, and consequences.
+
+Keep the review internal. Do not add model requests or tool calls solely to check a draft's style.
+Required skill loading and task-evidence checks are still allowed.
 
 For worked examples, read [examples/result-report.md](examples/result-report.md) or [examples/task-summary.md](examples/task-summary.md) when relevant.
 For setup, usage, and the relationship to ASD-STE100, see [README.md](README.md).

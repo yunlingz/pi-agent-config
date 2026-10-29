@@ -12,7 +12,8 @@ Use it directly in Pi; no other project or tool is required.
 - Give numbered options when the user must decide. Recommend an option only when the facts support it.
 - Use flexible patterns for progress, results, diagnosis, decisions, and multi-item summaries.
 - Keep simple answers simple. Do not force headings or status labels onto every reply.
-- Review every draft against the full rule set before sending. Correct violations instead of checking sentence length alone.
+- Apply all writing rules while drafting. Use one brief check of applicable rules before sending.
+- Use a deeper review for complex or high-risk replies. All writing rules remain mandatory.
 
 ## English writing
 
@@ -31,6 +32,7 @@ Explicit output formats take precedence. JSON-only output remains JSON-only.
 The skill is installed at `~/.pi/agent/skills/ste/SKILL.md`.
 The global `~/.pi/agent/AGENTS.md` requires it for every user-facing reply in every session.
 Pi must read the skill and its terminology reference before the first reply.
+Reuse the loaded instructions for the session. Reload them only after changes or when their contents are unavailable.
 
 - Start a new Pi session to load the current global instructions.
 - In an existing session, run `/reload` to refresh the instructions.
@@ -39,17 +41,19 @@ Pi must read the skill and its terminology reference before the first reply.
 
 STE is always active. There is no session disable command.
 Reloads, compaction, and handoffs must preserve this requirement.
-The model must complete the full pre-send review before every reply.
+Review depth depends on the reply's complexity and risk, not a change in writing requirements.
+Routine style review does not require extra model requests or tool calls.
+Required skill loading and task-evidence checks are still allowed.
 No extension, dependency, executable, or MCP connection is required.
 
 The skill relies on the model following instructions; it is not a programmatic formatter or compliance checker.
-The required review covers the complete rule set, not just sentence length.
+A brief check does not permit unsupported claims, inaccurate status, or altered output formats.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| [SKILL.md](SKILL.md) | Always-active scope, writing rules, reply patterns, and required pre-send review. |
+| [SKILL.md](SKILL.md) | Always-active scope, writing rules, reply patterns, and proportional pre-send checks. |
 | [references/terminology.md](references/terminology.md) | Status meanings, evidence boundaries, modal words, and concrete English. |
 | [examples/result-report.md](examples/result-report.md) | Before/after report and edge cases for failure, missing evidence, hypotheses, and exact output. |
 | [examples/task-summary.md](examples/task-summary.md) | Requirements summary and a decision example. |

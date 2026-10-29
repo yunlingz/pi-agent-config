@@ -22,7 +22,7 @@ When a task references project MCP tools, use `/skill:mcp-free-tools` for generi
 
 ## English STE communication
 
-The global [ste skill](skills/ste/README.md) defines a concise, evidence-based English style for technical replies. `AGENTS.md` requires it for every user-facing reply in every session. It puts key information first, separates work status from verification, and requires evidence for task-specific claims. Every reply requires a full pre-send review. The style changes user-facing prose, not project artifacts, and does not claim ASD-STE100 compliance.
+The global [ste skill](skills/ste/README.md) defines a concise, evidence-based English style for technical replies. `AGENTS.md` requires it for every user-facing reply in every session. It puts key information first, separates work status from verification, and requires evidence for task-specific claims. Reply checks scale with complexity and risk; all writing rules still apply. The style changes user-facing prose, not project artifacts, and does not claim ASD-STE100 compliance.
 
 STE is always active, including after reloads, compaction, and handoffs. There is no session disable command. Run `/reload` to refresh global instructions in an existing session; `/skill:ste` reloads the skill rules. Exact user output formats still take precedence. No extension or dependency is required.
 
@@ -39,6 +39,12 @@ The local [auto-compact extension](extensions/auto-compact/README.md) compacts b
 The local [cache-rate item](extensions/cache-rate/README.md) replaces Powerline's native cache percentage through its supported custom-status API. It includes cache writes in the total input denominator, displays one decimal place, and preserves the existing cache slot without patching installed packages.
 
 Autoformat and web-search extensions are not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
+
+## Upgrade extensions
+
+Use the global [upgrade-pi-extensions skill](skills/upgrade-pi-extensions/README.md) with `/skill:upgrade-pi-extensions`. It automatically selects compatible stable releases for global npm extensions, keeps exact version pins, and verifies each upgrade. Failed candidates are replaced with the previous version before an older compatible candidate is tried. There are no approval or interactive-test questions. Verified settings changes receive one local commit; nothing is pushed.
+
+The skill reuses Pi's commands and the existing configuration verifier, without a separate planner or upgrade engine. Pi itself, project packages, Git/local packages, and local extension source files are outside scope. Models, credentials, resource filters, and unrelated settings are preserved. Browser and interactive feature behavior is not automatically verified.
 
 ## Theme
 
@@ -64,7 +70,7 @@ No Codex skills, extensions, MCP servers, sessions, or other Codex settings were
 
 Run `/reload` after adding or editing skills or instructions. Invoke `/skill:sync-pi-config` to run its regression tests, check the currently installed Pi's JSON schemas and skill discovery, and start a real read-only agent session in a disposable OS temporary directory with `--no-mcp`. It checks the required global MCP-disable setting before starting the session, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
 
-`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact and cache-rate extensions' source/tests/docs, the ci_dark theme/checks/docs and Powerline color override, and the explicit `sync-pi-config`, `mcp-free-tools`, and `ste` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
+`.gitignore` allows only the reviewed configuration, these instructions, this README, the local auto-compact and cache-rate extensions' source/tests/docs, the ci_dark theme/checks/docs and Powerline color override, and the explicit `sync-pi-config`, `mcp-free-tools`, `ste`, and `upgrade-pi-extensions` skill files into version control. Credentials, sessions, caches, and other runtime files remain local. Add a narrow ignore exception if you later decide to track another configuration file.
 
 ```text
 git -C ~/.pi/agent diff --cached

@@ -8,7 +8,7 @@
 
 - STE is mandatory for every user-facing reply in every session. At session start, read the `ste` skill at its advertised location and its required reference before the first user-facing reply.
 - Keep STE active across reloads, compaction, and handoffs. There is no session disable command. Preserve this always-active requirement in compaction and handoff summaries.
-- Before every reply, complete the skill's full pre-send review. Correct rule violations before sending; short sentences alone are not sufficient.
+- Apply STE while drafting. Before each reply, make one brief check of applicable rules. Use a deeper review for complex or high-risk replies. All writing rules remain mandatory.
 - This style governs user-facing prose, not project artifacts. Explicit user output formats and higher-priority instructions take precedence.
 
 ## Keep progress visible
