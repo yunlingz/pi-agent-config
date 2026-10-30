@@ -2,6 +2,7 @@
   "theme": "ci_dark",
   "defaultProvider": "existing_gateway",
   "defaultModel": "gpt-latest",
+  "transport": "sse",
   "enabledModels": [
     "existing_gateway/gpt-latest"
   ],
