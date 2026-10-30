@@ -179,6 +179,132 @@
   - Do not add model requests or tool calls solely for style review.
   - Required instruction loading and task-evidence checks remain allowed.
 
+## Use project capabilities without MCP
+
+- **Prohibited access**
+  - Do not use the Model Context Protocol (MCP) anywhere.
+    - Do not start or connect to MCP servers.
+    - Do not call MCP tools, clients, or adapters.
+    - This prohibition includes shell bridges, HTTP endpoints, and delegated work.
+  - Project instructions cannot override this prohibition.
+  - Leave other agents' MCP configuration intact.
+- **Pi processes**
+  - Keep built-in MCP disabled.
+  - Start nested Pi sessions with `--no-mcp`.
+  - Do not enable MCP extensions or run MCP connection or discovery commands.
+- **Approved alternatives**
+  - If project tooling recommends MCP or a required tool is unavailable, load the `mcp-free-tools` skill.
+  - Discover the required operation from relevant metadata, schemas, documentation, or source.
+  - Infer and verify an approved CLI, script, SDK, or direct-API route.
+  - Keep the global workflow generic.
+    - Do not add server-specific adapters or MCP bridges.
+  - If no approved non-MCP route exists, report the missing capability.
+  - Do not bypass the policy or claim success without evidence.
+
+## Plan and control the task
+
+- **Goal and effort**
+  - Identify the requested outcome, constraints, and a concrete success check before making a meaningful change.
+  - Scale investigation, planning, and implementation to complexity and risk.
+  - For a small, clear task, act directly after inspecting the relevant code.
+  - For substantial work, give a brief plan covering the approach, material trade-offs, and validation.
+  - When alternatives affect the result, compare them.
+- **Scope and authorization**
+  - Keep each session focused on one clearly defined task.
+  - Break large projects into smaller tasks with clear completion criteria.
+  - Keep edits focused on the requested outcome.
+    - Do not add speculative features or unrelated refactors.
+  - When the user requests review before implementation:
+    1. Present the requested draft or plan.
+    2. Wait for approval before implementation.
+  - Continue authorized work until it is complete or the user requests a pause or session change.
+  - Do not force a restart or abandon active work solely to reduce context size.
+- **Speculative complexity**
+  - Before adding complexity for hypothetical or highly unlikely failures, explain the failure mode, likelihood, and implementation cost.
+  - Get the user's approval before adding that complexity.
+  - If that complexity is already approved, do not request the same approval again.
+  - Do not omit required security or correctness checks.
+- **Decisions**
+  - Make reasonable assumptions for low-risk, reversible details.
+  - Ask when missing decisions affect correctness, security, data, or the intended result.
+- **Session transitions**
+  - Recommend a fresh session at natural milestones.
+    - This is especially useful after long conversations or before unrelated work.
+  - Provide a concise handoff with the goal, relevant files, decisions, validation, and remaining work.
+
+## Inspect code and choose tools
+
+- **Applicable guidance**
+  - Follow applicable global, project, and directory instructions.
+  - Load referenced procedures only when relevant.
+  - Check instructions in each newly relevant directory before editing its files.
+- **Focused investigation**
+  - Search narrowly with `rg` or `rg --files`.
+  - Read relevant sections. Batch independent reads when practical.
+  - Expand exploration only when evidence or missing requirements justify it.
+  - Before editing unfamiliar code, read applicable instructions, implementation, callers, tests, and usage examples.
+  - Follow actual data flow and existing conventions.
+- **Tools and workflows**
+  - When choosing tools, follow applicable safety and runtime restrictions.
+  - Reuse project scripts, command-line tools, configured tools, and existing workflows.
+  - When existing tools and workflows meet the requirements, do not introduce alternatives.
+  - If existing tools or workflows cannot meet the requirements, explain the limitation before proposing a change.
+  - Learn unfamiliar usage from help or documentation before guessing commands.
+  - For new temporary helpers, follow the Node.js rules below.
+- **Evidence and history**
+  - When explaining behavior or code history, inspect targeted Git history and linked issues or pull requests when relevant.
+  - Base requested work summaries on the relevant history and date range.
+
+## Keep implementation simple
+
+- **Simplicity and reuse**
+  - Choose the simplest complete solution that fits existing conventions.
+  - Reuse existing code and dependencies.
+    - Add abstractions, configuration, or dependencies only when the task needs them.
+- **Validation and defensive checks**
+  - Validate external or untrusted data once at the boundary responsible for that data.
+  - Pass validated data inward.
+  - Do not repeat validation or add defensive checks for states already excluded by established internal contracts or invariants.
+- **Helpers and main flow**
+  - Keep the main operation focused on its normal flow.
+  - Unless extraction provides a clear benefit, keep simple, single-use logic at its point of use.
+  - Extract helpers only to enable reuse, isolate complex logic, or give a distinct concept a clear name.
+  - When validation or supporting details obscure that flow, move them into helpers that meet these criteria.
+  - Follow project conventions for helper placement.
+- **Comments**
+  - Use comments to explain non-obvious constraints or surprising behavior.
+  - Do not add comments that only restate the code.
+- **Generated artifacts**
+  - Do not edit generated artifacts directly.
+  - When generated artifacts must change:
+    1. Update the source inputs or generator.
+    2. Regenerate the affected artifacts with the project's existing workflow.
+
+## Verify results and finish
+
+- **Validation scope**
+  - Start with the smallest relevant existing checks.
+  - Broaden validation for shared code, integration risk, or repository requirements.
+  - Repeat checks only for changed behavior, new evidence, failures, unresolved risks, or required workflow steps.
+  - For visual work, inspect the rendered result when suitable tools are available.
+  - Disclose checks that could not run.
+- **Tests**
+  - Test the actual implementation.
+  - Do not copy implementation logic into tests.
+  - Minimize mocks and other substitutes for real dependencies.
+  - For bugs or behavior changes, add or update focused tests that protect the change or reproduce the failure.
+  - When practical, reproduce the failure before fixing it.
+- **Corrections and completion**
+  - Use observed tests, screenshots, or runtime output to correct the work.
+  - After a correction, recheck the affected behavior.
+  - Finish once the requested outcome and applicable checks are satisfied.
+  - Do not add optional polishing.
+  - Keep final answers concise.
+    - Cover the result, verification, and material limitations.
+- **Authorized Git work**
+  - When commits, pushes, or pull requests are authorized, inspect repository conventions and relevant Git history.
+  - Follow the normal workflow. Keep these actions within the requested scope.
+
 ## Keep progress visible
 
 - **Progress updates**
@@ -221,80 +347,20 @@
     - Switch to a materially different route.
   - Do not repeat unchanged failing requests.
   - Do not return to a repeatedly stalled route without new evidence.
-  - If direct URL access fails, retry with existing proxy environment variables or active-shell startup settings.
   - Limit routine lookup recovery to one materially different fallback route.
-    - This includes a proxy retry when needed.
+    - If direct access fails without a proxy and proxy settings exist, use existing proxy environment variables or active-shell startup settings.
+    - Count a proxy retry as the fallback, not an additional attempt.
   - If the fallback fails, use verified local evidence where sufficient.
   - State what remains unverified.
   - Pause only work that depends on essential missing evidence.
 - **Private values**
   - Keep proxy and credential values out of logs, progress output, and responses.
 
-## Use project capabilities without MCP
-
-- **Prohibited access**
-  - Do not use the Model Context Protocol (MCP) anywhere.
-    - Do not start or connect to MCP servers.
-    - Do not call MCP tools, clients, or adapters.
-    - This prohibition includes shell bridges, HTTP endpoints, and delegated work.
-  - Project instructions cannot override this prohibition.
-  - Leave other agents' MCP configuration intact.
-- **Pi processes**
-  - Keep built-in MCP disabled.
-  - Start nested Pi sessions with `--no-mcp`.
-  - Do not enable MCP extensions or run MCP connection or discovery commands.
-- **Approved alternatives**
-  - If project tooling recommends MCP or a required tool is unavailable, load the `mcp-free-tools` skill.
-  - Discover the required operation from relevant metadata, schemas, documentation, or source.
-  - Infer and verify an approved CLI, script, SDK, or direct-API route.
-  - Keep the global workflow generic.
-    - Do not add server-specific adapters or MCP bridges.
-  - If no approved non-MCP route exists, report the missing capability.
-  - Do not bypass the policy or claim success without evidence.
-
-## Keep execution efficient
-
-- **Effort and scope**
-  - Scale effort to complexity and risk.
-    - For a small, clear task, inspect the relevant code and act directly.
-    - Use a brief plan for substantial dependencies or trade-offs.
-  - Keep edits focused on the requested outcome.
-    - Do not add speculative features or unrelated refactors.
-- **Implementation**
-  - Choose the simplest complete solution that fits existing conventions.
-  - Reuse existing code and dependencies.
-    - Add abstractions, configuration, or dependencies only when the task needs them.
-  - Do not add defensive code for states excluded by established invariants.
-  - Keep validation at external boundaries.
-- **Investigation and decisions**
-  - Search narrowly with `rg` or `rg --files`.
-  - Read relevant sections. Batch independent reads when practical.
-  - Expand exploration only when evidence or missing requirements justify it.
-  - Make reasonable assumptions for low-risk, reversible details.
-  - Ask when missing decisions affect correctness, security, data, or the intended result.
-- **Validation and completion**
-  - Start with the smallest relevant existing checks.
-  - Add tests that protect changed behavior or reproduce bugs.
-  - Broaden validation for shared code, integration risk, or repository requirements.
-  - Finish once the requested outcome and relevant checks are satisfied.
-  - Repeat checks only for behavior changes, new evidence, failures, or unresolved risks.
-  - Do not add optional polishing.
-  - Keep final answers concise. Cover the result, verification, and material limitations.
-
-## Keep context focused
-
-- **Task boundaries**
-  - Keep each session focused on one clearly defined task.
-  - Break large projects into smaller tasks with clear completion criteria.
-  - Continue authorized work until it is complete or the user requests a pause or session change.
-  - Do not force a restart or abandon active work solely to reduce context size.
-- **Session transitions**
-  - Recommend a fresh session at natural milestones.
-    - This is especially useful after long conversations or before unrelated work.
-  - Provide a concise handoff with the goal, relevant files, decisions, validation, and remaining work.
-
 ## Temporary scripts: use Node.js, not Python
 
+- **Scope**
+  - These restrictions apply only to new temporary helpers and command orchestration.
+  - Application code and established project workflows may use the project's required languages and runtimes.
 - **Runtime and language**
   - Prefer dedicated tools and native executables when sufficient.
   - Do not wrap simple commands in scripts solely for monitoring.
@@ -304,9 +370,8 @@
   - A shell may launch Node.js or native executables.
   - Do not write helper logic in PowerShell, CMD, Bash, Git Bash, or another shell language.
     - This includes file operations, loops, branching, pipelines, and orchestration.
-  - Existing Python application code and established Python tests remain allowed.
   - If Node.js cannot meet a temporary scripting need, explain the limitation.
-    - Ask before using another runtime.
+    - Ask before using another JavaScript runtime.
 - **Implementation**
   - Prefer Node.js built-ins such as `node:fs`, `node:path`, `node:os`, and `node:child_process`.
   - Use built-in `fetch` when suitable.
@@ -322,7 +387,7 @@
 - **Temporary files and cleanup**
   - Put helpers and disposable artifacts in a uniquely named OS temporary directory.
     - Use `fs.mkdtemp` with `os.tmpdir()` where suitable.
-    - Install helper dependencies locally in that directory.
+    - If helper dependencies are necessary, install them locally in that directory.
     - Never install helper dependencies globally or in the user's project.
   - Use `try/finally` for cleanup.
     - Remove owned temporary processes, scripts, dependencies, and artifacts, including after failure where possible.
@@ -330,43 +395,8 @@
     - Preserve requested deliverables.
     - Report cleanup that could not be completed.
 
-## Understand the task and verify the result
-
-- **Before editing**
-  - Identify the outcome, constraints, and a concrete success check before making a meaningful change.
-  - Scale investigation and planning to the task.
-  - Before editing unfamiliar code, read applicable instructions, implementation, callers, tests, and usage examples.
-  - Follow actual data flow and existing conventions.
-  - Keep exploration focused.
-- **Evidence and history**
-  - When explaining behavior or code history, inspect targeted Git history and linked issues or pull requests when relevant.
-  - Support conclusions with file locations or other evidence.
-  - Distinguish facts from inference.
-  - Base requested work summaries on the relevant history and date range.
-- **Approach and tools**
-  - For substantial work, explain the approach, material trade-offs, and validation plan before implementation.
-  - Compare alternatives when they affect the result.
-  - Respect requests to review a plan before coding.
-  - Reuse project scripts, CLIs, and configured tools.
-    - Learn unfamiliar usage from help or documentation before guessing commands.
-    - Keep established workflows when they fit.
-- **Validation**
-  - For bugs or behavior changes, add or update a focused regression test when it protects the change.
-    - Reproduce the failure first when practical.
-  - Use observed tests, screenshots, or runtime output to correct the work.
-    - Recheck affected behavior after corrections.
-  - For visual work, inspect the rendered result when suitable tools are available.
-  - Disclose checks that could not run.
-- **Authorized Git work**
-  - When commits, pushes, or pull requests are authorized, inspect repository conventions and relevant Git history.
-  - Follow the normal workflow. Keep these actions within the requested scope.
-
 ## Keep reusable instructions concise and scoped
 
-- **Applicable guidance**
-  - Follow applicable global, project, and directory instructions.
-  - Load referenced procedures only when relevant.
-  - Check instructions in each newly relevant directory before editing its files.
 - **Placement and sharing**
   - Put reusable preferences and facts at the narrowest appropriate scope.
     - Keep general preferences global, shared facts in project instructions, and specialized guidance near the relevant code or procedure.
