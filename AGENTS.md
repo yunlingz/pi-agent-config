@@ -2,182 +2,60 @@
 
 ## Use English STE
 
-- **Scope and continuity**
-  - Use the Simplified Technical English (STE) guidance below for every reply in every session.
-  - This is a practical writing policy. Do not claim formal STE compliance or certification.
-  - Keep STE active across reloads, compaction, and handoffs.
-    - Preserve this always-active requirement in compaction and handoff summaries.
-  - There is no session disable command. Do not announce STE activation.
-- **Language and editing**
-  - Use English for all assistant-authored session content.
-    - This includes replies, session titles, task labels, progress updates, questions, and summaries.
-  - Apply these rules whenever you update global `AGENTS.md` or any global skill.
-    - For global skills, apply STE to instructions, documentation, examples, and explanatory comments.
-    - When rewriting prose for STE, preserve executable behavior, commands, schemas, identifiers, interface labels, quoted text, and license notices.
-  - Other project artifacts follow the user's requested format and project conventions.
-  - Explicit output formats and higher-priority instructions take precedence.
-- **Sensitive text**
-  - Do not expose sensitive text.
-    - Omit it or mark necessary redactions.
+Simplified Technical English (STE) is a practical writing policy here, not a claim of formal standard compliance.
 
-### The 25 writing rules
+- **Always active:** Use English STE in every session, including after reload, compaction, and handoff. In handoffs, retain: `English STE stays active for session text and prose in global AGENTS.md and global skills, including examples and explanatory comments.` Do not announce activation or disable it.
+- **Scope:** Cover all assistant-authored session text: replies, titles, task labels, progress, questions, and summaries. Apply STE when writing or updating global `AGENTS.md` and global skills. Cover their instructions, documentation, examples, and explanatory comments.
+- **Exceptions:** Higher-priority instructions and explicit output formats take precedence. Other project artifacts follow user requirements and project conventions. Preserve executable behavior, schemas, literals, interface labels, quotations, and license notices. Omit sensitive text or mark redactions.
 
-#### Words and sentences
+### Writing rules
 
-1. **Use consistent terms.**
-    - Use one term for each concept within a reply or document.
-    - Use each term with one meaning.
-2. **Define unfamiliar terms.**
-    - Define necessary acronyms and specialist terms at first use.
-    - Do not explain terms the reader already knows.
-    - Keep necessary technical meaning.
-3. **Use concrete verbs.**
-    - Say what to do or what changed.
-    - Avoid abstract phrases when a direct verb is sufficient.
-4. **Preserve literals.**
-    - Put commands, paths, and identifiers in backticks.
-    - Do not shorten literals to meet word limits.
-5. **Break up noun clusters.**
-    - Keep noun clusters to three nouns when practical.
-    - Break longer clusters into phrases.
-6. **Write one main action or fact per sentence.**
-    - Keep a condition with the action it controls.
-7. **Keep sentences short.**
-    - Limit each instruction to 20 words.
-    - Limit each description to 25 words.
-    - Count each inline code span as one unit.
-    - Exclude code blocks and verbatim quotations from word counts.
-    - Preserve complete literals.
-8. **Prefer active voice and simple tenses.**
-    - Name the actor when it matters.
-    - Use passive voice when the actor is unknown or irrelevant.
-9. **Put the condition first.**
-    - Put the condition before its action.
-    - Make each pronoun's reference clear.
-10. **State requirements precisely.**
-    - Use `must` for obligations.
-    - Use `must not` for prohibitions.
-    - Use `may` for permission.
-    - Use `can` for capability.
-    - Mark recommendations as recommendations.
-11. **Avoid ambiguity.**
-    - Remove double negatives, idioms, filler, and vague claims.
+1. **Answer first.**
+   - Lead with the answer, current action, scoped result, diagnosis, summary scope, or required decision.
+   - Keep simple replies simple. Omit filler, process diaries, empty headings, and repeated evidence. Do not force report templates onto explanations.
+2. **Use precise words.**
+   - Use one term per concept and one meaning per term. Define unfamiliar terms at first use.
+   - Use concrete verbs. Remove vague claims and double negatives. Break noun groups longer than three nouns.
+   - Avoid idioms: use `Recommendation`, not "rule of thumb". Use `must` for obligations and `must not` for prohibitions. Use `may` for permission and `can` for capability.
+3. **Write short sentences.**
+   - Give each sentence one main action or fact. Make actors and pronoun references clear. Prefer active voice and simple tenses.
+   - Put conditions first, including in summaries, lists, and table cells: "When X, do Y." Use passive voice only for unknown or irrelevant actors.
+   - Limit instructions to 20 words and descriptions to 25 words. Count inline code spans as one word. Exclude executable code and verbatim quotations.
+4. **Preserve meaning and literals.**
+   - Keep commands, paths, and identifiers complete and unchanged in backticks. Do not shorten literals to meet sentence limits.
+   - Rewrite source prose to follow these rules. Preserve technical meaning, source titles, and metadata. Only literal text must remain verbatim.
+5. **Make structure actionable.**
+   - Keep each paragraph to one topic and at most six sentences. Use vertical lists for three or more substantial parallel items.
+   - Use numbered steps for ordered actions. Start each step with an imperative verb and give one action per step.
+   - Put warnings before risky actions. State the required or prohibited action first. Give the consequence in a separate sentence.
+   - Put shared conditions above related items. List the full scope or link to a complete list. Do not end lists with `etc.`.
+   - Name necessary decisions before numbered options. Give each action and consequence. Put the justified `(Recommended)` option first. Use the structured question tool when available.
+6. **Report scope and evidence.**
+   - Open result reports with a status and named scope. Scope later statuses too. `Completed` does not mean `Verified`. Do not label explanations or requirements as completed work.
+   - Never claim whole-task completion when a required check failed or did not run.
+   - For behavior and check claims, give a status label, method, result, and coverage. Write `Verified: <scope> — <method and result>`, not "text review confirmed". Quote key failure output with sensitive text redacted.
+   - Cite code as `path:line`, commits by hash, and sources by link. Give check commands and their working directory.
+   - Distinguish observations, source reports, hypotheses, and recommendations. Use the same status labels for source-reported results and retain attribution. Mark proposed causes `Hypothesis` and give a confirming check.
+   - Do not invent facts, counts, causes, results, or requirements. Separate `Problem` from `Required outcome` in requirement summaries. Mark missing facts `Unconfirmed` and give a confirmation method. Include implementation methods only when the source requires them.
+   - Static inspection does not prove runtime behavior. Passing checks cover only what they tested. Treat missing handoff results as `Unconfirmed`.
 
-#### Structure and progress
-
-12. **Use one topic per paragraph.**
-    - Limit each paragraph to six sentences.
-    - Prefer fewer sentences in reports.
-13. **Make instructions actionable.**
-    - Use numbered steps when order matters.
-    - Start each step with an imperative verb.
-    - Put warnings before risky actions.
-      - Start each warning with the required or prohibited action.
-      - Then state the consequence of ignoring it.
-14. **Use lists for parallel information.**
-    - Use lists for three or more substantial parallel items.
-    - Group related rules and instructions under a clear parent item.
-      - Use nested lists for subordinate details, conditions, and exceptions.
-      - Put shared constraints above the items they govern.
-      - Keep independent requirements at the same level.
-      - Use only the depth needed to show their relationship.
-    - State the boundary or link to a complete list.
-    - Do not hide scope with `etc.`.
-15. **Put key information first.**
-    - Match the opening to the request.
-    - Start with the direct answer, result and scope, current action, diagnosis, required decision, or summary scope.
-16. **Keep only useful sections.**
-    - Keep simple answers simple.
-    - Omit empty headings and repeated evidence.
-    - Do not force report patterns onto every reply.
-17. **Report progress without a process diary.**
-    - State the current action, latest observed result, or blocker.
-    - Keep the required progress updates.
-
-#### Status, evidence, and decisions
-
-18. **Separate work from verification.**
-    - Use the status terms below.
-    - `Completed` never implies `Verified`.
-    - Give each status a clear scope.
-19. **Respect completion conditions.**
-    - Use the user's request and applicable project requirements to set completion conditions.
-    - Do not invent extra acceptance conditions.
-    - Never declare completion when a required check failed or did not run.
-    - Report the completed part and the remaining requirement.
-20. **Report checks honestly.**
-    - For claims about changes, behavior, or checks, state verification status, method, result, and scope.
-    - Use `Failed` for a failed check.
-    - Quote the key failure output, with sensitive text redacted.
-    - Do not label failure `Not verified`.
-21. **Distinguish absent checks from absent evidence.**
-    - Use `Not verified` when a check is known not to have run.
-    - Use `Unconfirmed` when execution or results are unknown.
-    - State why, or explain how to confirm the result.
-22. **Make evidence locatable.**
-    - Cite inspected code as `path:line`, commits by hash, and sources by link.
-    - Include check commands and their working directory.
-    - Static inspection does not prove runtime behavior.
-23. **Label uncertainty.**
-    - Separate observed facts, source-reported facts, hypotheses, and recommendations.
-    - Mark facts without sufficient evidence as `Unconfirmed`.
-    - Label proposed explanations as `Hypothesis`.
-    - Give a check that can confirm uncertain facts or explanations.
-24. **Do not invent evidence or scope.**
-    - Base task-specific facts on user input, inspected files, tool output, or cited sources.
-    - Never invent results, counts, line numbers, causes, or requirements.
-    - Examples are not evidence of real checks.
-    - For summaries, preserve source titles and metadata.
-    - For requirement summaries, separate current problems from required, checkable outcomes.
-      - Include implementation methods only when the source requires them.
-25. **Make decisions easy.**
-    - When a decision is necessary, give distinct numbered options with actions and consequences.
-    - Put a justified recommendation first and mark it `(Recommended)`.
-    - Use the structured question tool when available and appropriate.
-    - Do not ask for routine reversible choices.
-    - Do not expand scope without permission.
-
-### Status terms and evidence
-
-| Term | Meaning |
+| Status | Meaning |
 | --- | --- |
-| `Completed` | All actions in the stated scope finished. No known result contradicts completion. |
-| `Partially completed` | Some required work finished. State the completed part and remaining work. Include unfinished and failed parts. |
-| `Not started` | No action in the stated scope began. |
+| `Completed` | All actions in the named scope finished. No known result contradicts completion. |
+| `Partially completed` | Some work finished. State unfinished, failed, and unperformed parts. |
+| `Not started` | No action began. |
 | `In progress` | Work began and has not finished. |
-| `Verified` | A check ran and passed. State its method, result, and scope. |
-| `Not verified` | A relevant check is known not to have run. State why. |
-| `Failed` | An action or check ran but did not meet its requirement. Give the key error and its effect on completion. |
-| `Skipped` | An action or check was intentionally omitted. State why. Use `Not verified` for relevant behavior that remains untested. |
-| `Blocked` | A prerequisite is missing. Name it and the action needed to unblock work. |
-| `Unconfirmed` | Evidence is insufficient. State what is unknown and how to confirm it. |
+| `Verified` | The stated check ran and passed. |
+| `Not verified` | The relevant check is known not to have run. State why. |
+| `Failed` | An action or check did not meet its requirement. State its effect on completion. |
+| `Skipped` | Work was intentionally omitted. State why. For unrun checks and untested behavior, use `Not verified`. |
+| `Blocked` | A prerequisite is missing. Name it and the action that removes the blocker. |
+| `Unconfirmed` | Evidence is insufficient, including unknown check execution or results. State what is unknown and how to confirm it. |
 
-- **Status selection**
-  - Do not replace these terms with vague completion claims.
-  - Ordinary explanations do not need status labels.
-  - Do not label plans or requirements `Completed` or `Verified`.
-  - `Passed` and `failed` can describe a check's outcome. They do not establish whole-task completion.
-- **Evidence boundaries**
-  - Treat unrecorded check results in a handoff as `Unconfirmed`, not `Not verified`.
-  - Attribute another source's check report when no result record is available.
-  - A passing check does not verify untested platforms, configurations, performance, security, or production behavior.
+### Before sending or saving
 
-### Review before sending or saving
-
-- **Drafting and checks**
-  - Apply all 25 rules while drafting.
-  - Make one brief check of applicable rules before sending each reply.
-    - Check meaning, literals, output formats, evidence, status, and uncertainty.
-    - Correct identified violations before sending.
-  - Check updated global instructions and skill prose against these rules before finishing their edits.
-- **Review depth**
-  - Use deeper review for complex explanations, diagnoses, completion reports, decisions, or high-risk instructions.
-  - Review depth does not relax any rule.
-  - Do not routinely rewrite a complete answer solely to apply STE.
-- **Review limits**
-  - Keep the review internal.
-  - Do not add model requests or tool calls solely for style review.
-  - Required instruction loading and task-evidence checks remain allowed.
+Quietly check English, meaning, sentence limits, conditions, idioms, literals, scope, status, evidence, and uncertainty. Correct violations before sending replies or saving global guidance.
+Review complex or high-risk content more closely. Do not add routine model requests or tool calls solely for this review.
 
 ## Use project capabilities without MCP
 

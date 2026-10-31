@@ -23,7 +23,7 @@ When a task references project MCP tools, use `/skill:mcp-free-tools` for generi
 ## English STE communication
 
 The writing policy is at the top of [AGENTS.md](AGENTS.md#use-english-ste).
-It contains all 25 requirements, status meanings, and review instructions.
+Six writing groups retain the upstream principles, fixed status meanings, and an internal review.
 STE applies to every reply and to updates of global `AGENTS.md` and global skills.
 For global skills, it covers instructions, documentation, examples, and explanatory comments.
 Style edits preserve executable behavior, commands, schemas, identifiers, quoted text, and license notices.
