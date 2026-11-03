@@ -4,6 +4,7 @@
 !AGENTS.md
 !models.json
 !settings.json
+!pi-vcc-config.json
 !README.md
 !/licenses/
 !/licenses/ste/
@@ -15,6 +16,7 @@
 !/extensions/auto-compact/controller.test.mjs
 !/extensions/auto-compact/verify-summary-integration.mjs
 !/extensions/auto-compact/verify-integration.mjs
+!/extensions/auto-compact/verify-vcc-integration.mjs
 !/extensions/auto-compact/README.md
 !/extensions/cache-rate/
 !/extensions/cache-rate/index.ts

@@ -39,10 +39,16 @@ export function routeQuitSubmission(ctx, isSubmit) {
 }
 
 export class AutoCompactController {
-  constructor({ now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+  constructor({
+    now = Date.now,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
+    hasPiVcc = () => false,
+  } = {}) {
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
+    this.hasPiVcc = hasPiVcc;
     this.generation = 0;
     this.context = undefined;
     this.timer = undefined;
@@ -101,7 +107,7 @@ export class AutoCompactController {
   }
 
   workFinished() {
-    // Native compaction events fire before its completion callback. The callback
+    // Compaction events fire before the completion callback. The callback
     // owns scheduling for our own attempt; other compactions count as activity.
     if (!this.compaction) {
       this.activity();
@@ -256,7 +262,7 @@ export class AutoCompactController {
       ? "Compacting the session before exit."
       : "Compacting the session after 30 minutes of inactivity.", "info");
 
-    const finish = (error) => {
+    const finish = (error, result) => {
       if (this.compaction !== attempt || this.generation !== attempt.generation) {
         return;
       }
@@ -275,9 +281,11 @@ export class AutoCompactController {
       }
       if (noop) {
         this.noopMarker = attempt.marker;
+      } else if (result?.details?.compactor === "pi-vcc") {
+        ctx.ui.notify("Auto-compaction completed with pi-vcc.", "info");
       }
       if (this.quitting) {
-        // Recheck after Pi flushes input queued during native compaction. Any
+        // Recheck after Pi flushes input queued during compaction. Any
         // newly completed conversation must be compacted before shutdown too.
         this.schedule(0);
       } else if (this.activitySerial !== attempt.activitySerial) {
@@ -289,8 +297,9 @@ export class AutoCompactController {
 
     try {
       ctx.compact({
-        customInstructions: "Write the compaction summary in English.",
-        onComplete: () => finish(),
+        // pi-vcc treats prose instructions as an agent follow-up prompt.
+        customInstructions: this.hasPiVcc() ? undefined : "Write the compaction summary in English.",
+        onComplete: (result) => finish(undefined, result),
         onError: (error) => finish(error),
       });
     } catch (error) {

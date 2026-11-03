@@ -110,6 +110,7 @@ try {
   });
   await loader.reload();
   assert.deepEqual(loader.getExtensions().errors, []);
+  assert.equal(loader.getExtensions().extensions.length, 1, "This fixture must load auto-compact without pi-vcc");
   const manager = SessionManager.create(root, join(root, "sessions"));
   for (let index = 0; index < 24; index += 1) {
     manager.appendMessage({ role: "user", content: `Synthetic historical turn ${index}. ${"Completed fixture evidence. ".repeat(300)}`, timestamp: Date.now() });
@@ -159,6 +160,8 @@ try {
   assert.equal(manager.getBranch().filter((entry) => entry.type === "compaction").length, 1);
   const restored = SessionManager.open(manager.getSessionFile());
   assert.equal(restored.getBranch().filter((entry) => entry.type === "compaction").length, 1);
+  assert.equal(restored.getBranch().find((entry) => entry.type === "compaction").fromHook, false);
+  assert.equal(notifications.some(({ text }) => text === "Auto-compaction completed with pi-vcc."), false);
   assert.equal(session.thinkingLevel, "max");
   phase = "checking normal requests remain max reasoning";
   await session.prompt("Make one ordinary fixture response.");
