@@ -8,9 +8,9 @@ A local Pi extension that publishes a Powerline custom item without modifying `p
 cached-input share = cacheRead / (input + cacheRead + cacheWrite)
 ```
 
-Pi normalizes `input` as input that is neither read from nor written to the prompt cache. Cache writes are newly processed input, not cache hits, so they belong in the denominator. Powerline 0.20.2's built-in percentage omits them.
+Pi normalizes `input` as input that is neither read from nor written to the prompt cache. Cache writes are newly processed input, not cache hits, so they belong in the denominator. Powerline 0.21.0's built-in percentage omits them.
 
-The item sums valid assistant usage on the current session branch, skipping failed and aborted responses. Like the original footer, totals include history before compaction and exclude tool-result/subagent usage. The cached-token count is cumulative across requests, not current context size or cache capacity.
+The item sums valid assistant usage on the current session branch and skips failed or aborted responses. It includes history before compaction and excludes tool-result/subagent usage. Powerline 0.21.0's billing totals use a broader, all-branch scope. The cached-token count is cumulative across requests, not current context size or cache capacity.
 
 The percentage rounds to one decimal, for example `cache in: 9.2k (92.0%)`. A genuine near-perfect rate can still round to `100.0%`. Empty sessions and sessions with no cached reads keep the item hidden.
 
@@ -27,7 +27,7 @@ The repository's `settings.json`:
 
 Other primary segments, the secondary row, separators, icons, and editor behavior are unchanged. The explicit primary layout preserves today's default preset order; update that layout if you later want a different arrangement.
 
-The extension runs only in TUI sessions. It includes the final response during `message_end` because Pi 1.3 emits that event before persisting the message, then refreshes from the authoritative branch on turn completion, settlement, navigation, and compaction. Session start/reload refreshes the value; shutdown clears this extension's status key.
+The extension runs only in TUI sessions. It includes the final response during `message_end` because Pi 1.4.0 emits that event before persisting the message, then refreshes from the authoritative branch on turn completion, settlement, navigation, and compaction. Session start/reload refreshes the value; shutdown clears this extension's status key.
 
 ## Checks
 

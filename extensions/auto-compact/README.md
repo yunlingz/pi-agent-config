@@ -19,11 +19,11 @@ Run `/reload`, or start a fresh session with `pi --no-mcp`. Pi discovers this di
 - **Failure/cancellation:** keep Pi open if pre-quit compaction fails. Do not accept incomplete summary text. Idle failures wait for new activity or an explicit command. Manual `/compact` still uses Pi's standard hooks.
 - **Cleanup:** stop timers and remove input listeners on shutdown, reload and session replacement. Timers do not keep a process alive. Print, JSON and RPC sessions do not start idle compaction.
 
-Pi 1.3.0 handles built-in `/quit` before extension commands. The plugin observes the configured submit key through `onTerminalInput` and rewrites only `/quit` to its `/compact-quit` command. It does not consume the key or replace the editor. `/compact-quit` is also available directly in TUI sessions.
+Pi 1.4.0 handles built-in `/quit` before extension commands. The plugin observes the configured submit key through `onTerminalInput` and rewrites only `/quit` to its `/compact-quit` command. It does not consume the key or replace the editor. `/compact-quit` is also available directly in TUI sessions.
 
 ## Built-in output-limit failures
 
-When built-in fallback runs, `Summarization failed: generation hit the token cap and the summary is incomplete` comes from Pi's compactor. It does not come from the idle timer. With the default reserve of 16384, native history summaries get at most 13107 output tokens and split summaries 8192, capped further by the selected model's `maxTokens`. Reasoning and visible summary text share the output allowance. A large input/context window does not enlarge these budgets automatically.
+When built-in fallback reports `Summarization failed: generation hit the token cap and the summary is incomplete`, Pi rejected an incomplete summary. The idle timer does not produce this error. Pi 1.4.0 uses the model's output limit, reduced when input and output would exceed the context window. `compaction.reserveTokens` controls automatic compaction timing, not summary output length. Reasoning and visible summary text share the output allowance. Provider or model output limits can still cause incomplete summaries.
 
 When `pi-vcc` handles compaction, it uses algorithmic extraction instead of a model summary request. Its `smartKeepTail` setting controls the retained tail. Extraction can omit details; `vcc_recall` can retrieve earlier session entries.
 
@@ -50,7 +50,7 @@ node extensions/auto-compact/verify-vcc-integration.mjs Q:/.tools/.npm-global/no
 
 The simulated-clock tests cover the 30-minute schedule, work guards, cancellation, repeated quits, queued input, session changes, and cleanup. They also cover `pi-vcc` availability, instruction handling, truthful completion messages, and stale callbacks. The first installed-Pi check verifies actual loading, keybindings, persistence and quit ordering with model requests blocked.
 
-The native-summary integration check uses the installed Pi and a loopback Responses fixture. It reproduces the exact output-cap failure for both manual and plugin-triggered compaction, verifies identical model/reasoning/output settings, no automatic policy retry, no partial checkpoint and no quit on failure. A subsequent explicit successful attempt persists a native handoff, and ordinary calls still use max reasoning. Only synthetic history/credentials are used; MCP and unrelated extensions remain disabled, and temporary state is cleaned up.
+The native-summary integration check uses the installed Pi and a loopback Responses fixture. It verifies that manual and plugin-triggered summaries use the model's output limit with max reasoning. An incomplete response must fail without a partial checkpoint or shutdown. The check also verifies identical model/output settings, unchanged compaction settings, and no automatic policy retry. A subsequent explicit successful attempt persists a native handoff, and ordinary calls still use max reasoning. The fixture uses only synthetic history and credentials, keeps MCP and unrelated extensions disabled, and removes temporary state.
 
 The `pi-vcc` check loads the actual installed package and the local extension. It covers manual, pre-quit, and clock-driven idle compaction. It verifies the default override, persisted `pi-vcc` checkpoints, zero model requests, no unsolicited agent turns, preserved settings, and UI notifications before shutdown. It tests both extension load orders. An optional second argument selects the installed `pi-vcc` package directory.
 

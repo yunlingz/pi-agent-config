@@ -6,11 +6,17 @@ This directory is both Pi's default user configuration directory and a local Git
 
 Run `pi` from a project folder. Use `pi --continue` to resume its latest session, `/model` to select a model, `/thinking` to change reasoning effort, and `/compact` for manual compaction.
 
-Pi 1.3.0 is installed globally with npm using `--ignore-scripts`. To update through the same installation method:
+Pi 1.4.0 is installed globally with npm using `--ignore-scripts`.
+On this devbox, use the company registry instead of `pi update`.
+
+Query the available release, then install an exact version:
 
 ```text
-npm install --global --ignore-scripts @earendil-works/pi-coding-agent
+npm view @earendil-works/pi-coding-agent version --registry=https://packagefeedproxy.microsoft.io/npm/ --fetch-retries=0 --fetch-timeout=20000
+npm install --global --prefix Q:/.tools/.npm-global --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.4.0 --registry=https://packagefeedproxy.microsoft.io/npm/ --fetch-retries=0 --fetch-timeout=20000
 ```
+
+For a later upgrade, replace `1.4.0` with the query result.
 
 Git Bash is discovered automatically from the existing Git for Windows installation. No shell wrapper or environment-variable changes are needed.
 
@@ -46,6 +52,7 @@ Global npm package versions are pinned in `settings.json`; downloaded packages a
 - `@juicesharp/rpiv-todo`: visible task tracking; `/todos` lists tasks and `Ctrl+Shift+T` toggles the panel.
 - `@juicesharp/rpiv-ask-user-question`: structured choices when the agent needs clarification; the tool is omitted in non-interactive runs.
 - `pi-powerline-footer`: model, thinking, context, token, and Git information; `/powerline` controls the display. AI-generated vibes, automatic follow-up classification, and the welcome overlay are off. Git polling is branch-only. Powerline does not intercept `/compact`.
+- `@plannotator/pi-extension`: browser plan reviews, Markdown annotations, and code reviews; `/plannotator-plan-mode` controls plan mode.
 - `@sting8k/pi-vcc@0.11.1`: algorithmic compaction and the `vcc_recall` tool. [pi-vcc-config.json](pi-vcc-config.json) explicitly enables `overrideDefaultCompaction: true`. It handles `/compact`, threshold and overflow compaction, and requests from the local auto-compact extension. Its compaction does not request a model summary.
 
 The local [auto-compact extension](extensions/auto-compact/README.md) compacts before `/quit` and after 30 minutes of inactivity in interactive sessions. It uses Pi's standard hooks, which select `pi-vcc` when its override is enabled. Without loaded `pi-vcc`, it uses Pi's built-in compactor. A successful `pi-vcc` result prints `Auto-compaction completed with pi-vcc.` before a pending quit. It avoids passing prose that `pi-vcc` would run as a follow-up prompt. Work guards, failure handling, the selected model, and reasoning level remain unchanged. Each compactor retains its own summary and retention policy. Run `/reload` to load the local extension changes.
@@ -69,6 +76,9 @@ The default theme is [ci_dark](themes/README.md), adapted from your iTerm palett
 `settings.json` selects `existing_gateway/gpt-latest` with `max` reasoning effort. `models.json` uses the same Responses API gateway as Codex, at `http://127.0.0.1:48081`, with text/image input, a configured context window of 1,050,000 tokens and maximum output allowance of 128,000. The thinking map enables `xhigh` and `max` for this custom model ID.
 
 Automatic compaction is enabled. A native `compaction.modelOverrides` entry reserves 192,000 tokens for `existing_gateway/gpt-latest`: 128,000 for output plus 64,000 extra headroom below the approximately 922,000-token usable-input ceiling observed upstream. The nominal threshold is above 858,000 context tokens; native checks and overflow recovery still govern actual timing. For built-in compaction, recent-history retention remains at Pi's 20,000-token default. When `pi-vcc` handles compaction, its `smartKeepTail` policy selects the retained tail. Other models retain the default 16,384-token reserve. Codex's 820,000-token trigger is not migrated. These are native configuration values, not auto-compact plugin overrides.
+
+On Pi 1.4.0, native summaries use the model's output limit.
+The reserve controls automatic compaction timing, not summary output length.
 
 The gateway must already be running, as it does for Codex. Its credential was copied once into Pi's private `auth.json`; it is excluded from Git. Rotate that credential separately if the server credential changes.
 

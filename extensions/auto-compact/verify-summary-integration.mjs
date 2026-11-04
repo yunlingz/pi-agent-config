@@ -131,11 +131,11 @@ try {
     shutdownHandler() { shutdowns += 1; },
     onError: (error) => extensionErrors.push(error),
   });
-  phase = "reproducing the native max-reasoning output-cap failure";
+  phase = "checking incomplete summaries at the model output limit";
   await assert.rejects(() => session.compact(), /generation hit the token cap/);
   assert.equal(manager.getBranch().filter((entry) => entry.type === "compaction").length, 0);
   assert.equal(requests[0].effort, "xhigh");
-  assert.equal(requests[0].limit, 13107);
+  assert.equal(requests[0].limit, fixture.maxTokens, "Native summaries must use the model output limit");
   assert.equal(session.thinkingLevel, "max");
   const originalSettings = JSON.stringify(settings.getCompactionSettings(fixture));
   const thinkingEntries = manager.getBranch().filter((entry) => entry.type === "thinking_level_change").length;
@@ -154,7 +154,8 @@ try {
   assert.deepEqual(failures, []);
   const owned = requests.filter((request) => request.summary).slice(1);
   assert.equal(owned.length, 2);
-  assert.ok(owned.every((request) => request.model === fixture.id && request.effort === "xhigh" && request.limit === 13107));
+  assert.ok(owned.every((request) =>
+    request.model === fixture.id && request.effort === "xhigh" && request.limit === fixture.maxTokens));
   assert.equal(manager.getBranch().filter((entry) => entry.type === "thinking_level_change").length, thinkingEntries);
   assert.equal(JSON.stringify(settings.getCompactionSettings(fixture)), originalSettings);
   assert.equal(manager.getBranch().filter((entry) => entry.type === "compaction").length, 1);
@@ -169,7 +170,7 @@ try {
   assert.equal(requests.at(-1).effort, "xhigh");
   assert.equal(session.thinkingLevel, "max");
   succeeded = true;
-  log(`PASS: installed Pi ${packageInfo.version}; manual/owned summaries preserve model, max reasoning and native output cap; failure keeps Pi open with no partial checkpoint; explicit retry persists a complete handoff; ${summaryCalls} local summary requests`);
+  log(`PASS: installed Pi ${packageInfo.version}; manual/owned summaries preserve model, max reasoning and the model output limit; failure keeps Pi open with no partial checkpoint; explicit retry persists a complete handoff; ${summaryCalls} local summary requests`);
 } finally {
   if (!succeeded) {
     log(JSON.stringify({ phase, requests, shutdowns, summaryCalls, failures, notifications }));
