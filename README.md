@@ -61,6 +61,17 @@ The local [cache-rate item](extensions/cache-rate/README.md) replaces Powerline'
 
 Autoformat and web-search extensions are not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
 
+## Upgrade Pi and extensions
+
+Use [upgrade-pi-agent](skills/upgrade-pi-agent/SKILL.md) with `/skill:upgrade-pi-agent` for the full company-registry workflow.
+It covers Pi, npm extensions, compatibility checks, and reviewed local configuration commits.
+Every npm operation uses `https://packagefeedproxy.microsoft.io/npm/`.
+A remote push requires an explicit request.
+
+This skill contains text instructions only.
+It reuses `upgrade-pi-extensions`, `sync-pi-config`, and existing repository checks.
+Creating or reviewing it does not run upgrades or change Git history.
+
 ## Upgrade extensions
 
 Use the global [upgrade-pi-extensions skill](skills/upgrade-pi-extensions/README.md) with `/skill:upgrade-pi-extensions`. It automatically selects compatible stable releases for global npm extensions, keeps exact version pins, and verifies each upgrade. Failed candidates are replaced with the previous version before an older compatible candidate is tried. There are no approval or interactive-test questions. Verified settings changes receive one local commit; nothing is pushed.
@@ -97,7 +108,7 @@ No Codex skills, extensions, MCP servers, sessions, or other Codex settings were
 Run `/reload` after adding or editing skills or instructions. Invoke `/skill:sync-pi-config` to run its regression tests, check the currently installed Pi's JSON schemas and skill discovery, and start a real read-only agent session in a disposable OS temporary directory with `--no-mcp`. It checks the required global MCP-disable setting before starting the session, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
 
 `.gitignore` tracks only reviewed configuration, documentation, local extensions, themes, and explicitly listed global skill files.
-The tracked global skills are `sync-pi-config`, `mcp-free-tools`, and `upgrade-pi-extensions`.
+The tracked global skills are `sync-pi-config`, `mcp-free-tools`, `upgrade-pi-extensions`, and `upgrade-pi-agent`.
 The retained STE license is also tracked.
 Credentials, sessions, caches, and other runtime files remain local.
 Add a narrow ignore exception before tracking another configuration file.
