@@ -19,10 +19,10 @@
     "-builtin:mcp"
   ],
   "packages": [
-    "npm:@juicesharp/rpiv-todo@2.13.9",
-    "npm:@juicesharp/rpiv-ask-user-question@2.13.9",
-    "npm:pi-powerline-footer@0.20.2",
-    "npm:@plannotator/pi-extension@0.28.26",
+    "npm:@juicesharp/rpiv-todo@2.15.0",
+    "npm:@juicesharp/rpiv-ask-user-question@2.15.0",
+    "npm:pi-powerline-footer@0.21.0",
+    "npm:@plannotator/pi-extension@0.28.33",
     "npm:@sting8k/pi-vcc@0.11.1"
   ],
   "workingVibe": "off",
