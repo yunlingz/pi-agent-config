@@ -24,6 +24,14 @@
 !/extensions/cache-rate/cache-rate.test.mjs
 !/extensions/cache-rate/verify-integration.mjs
 !/extensions/cache-rate/README.md
+!/extensions/session-history/
+!/extensions/session-history/index.ts
+!/extensions/session-history/history-transcript.ts
+!/extensions/session-history/history-window.mjs
+!/extensions/session-history/history-window.test.mjs
+!/extensions/session-history/verify-integration.mjs
+!/extensions/session-history/verify-plugin-compatibility.mjs
+!/extensions/session-history/README.md
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
 !/themes/

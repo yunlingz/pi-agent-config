@@ -110,6 +110,7 @@ Its Pi, project-package, migration, and push exclusions remain active within tha
 - Run the documented checks for:
   - [Auto-compact](../../extensions/auto-compact/README.md): unit tests, native compaction, failure handling, quit ordering, and actual pi-vcc integration.
   - [Cache-rate](../../extensions/cache-rate/README.md): unit tests and integration with installed Pi and Powerline.
+  - [Session history](../../extensions/session-history/README.md): lazy loading, lifecycle, full extension compatibility, and compaction integration.
   - [Themes](../../themes/README.md): installed schema, native loader, supported color modes, and rendering checks.
 - Exercise updated third-party tools with suitable existing automatic checks.
   Use actual installed extension implementations; add temporary Node.js fixtures only for material coverage gaps.

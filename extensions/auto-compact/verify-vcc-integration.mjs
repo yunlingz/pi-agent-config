@@ -9,6 +9,7 @@ import { IDLE_MS, QUIT_COMMAND } from "./controller.mjs";
 const piPackage = resolve(process.argv[2] ?? "");
 const agentDirectory = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 const vccDirectory = resolve(process.argv[3] ?? join(agentDirectory, "npm", "node_modules", "@sting8k", "pi-vcc"));
+const historyDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../session-history");
 const piInfo = JSON.parse(readFileSync(join(piPackage, "package.json"), "utf8"));
 const vccInfo = JSON.parse(readFileSync(join(vccDirectory, "package.json"), "utf8"));
 assert.equal(piInfo.name, "@earendil-works/pi-coding-agent");
@@ -89,6 +90,9 @@ try {
   process.env.PI_OFFLINE = "1";
   process.env.PI_TELEMETRY = "0";
   const sdk = await import(pathToFileURL(join(piPackage, "dist", "index.js")).href);
+  const tui = await import(pathToFileURL(join(piPackage, "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const themeApi = await import(pathToFileURL(join(piPackage, "dist", "modes", "interactive", "theme", "theme.js")).href);
+  themeApi.initTheme("dark", false);
   const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = sdk;
   for (const trigger of ["manual", "quit", "idle"]) {
     phase = `${trigger}: loading actual extensions`;
@@ -101,6 +105,8 @@ try {
     const notificationsAtShutdown = [];
     const instructions = [];
     const prompts = [];
+    const inputListeners = new Set();
+    const widgets = new Map();
     let shutdowns = 0;
     let modelRequests = 0;
     const settings = SettingsManager.inMemory({
@@ -130,6 +136,7 @@ try {
     const paths = [
       join(dirname(fileURLToPath(import.meta.url)), "index.ts"),
       join(vccDirectory, "index.ts"),
+      join(historyDirectory, "index.ts"),
     ];
     if (trigger === "quit") paths.reverse();
     const loader = new DefaultResourceLoader({
@@ -150,7 +157,7 @@ try {
     });
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
-    assert.equal(loader.getExtensions().extensions.length, 3);
+    assert.equal(loader.getExtensions().extensions.length, 4);
     const config = JSON.parse(readFileSync(process.env.PI_VCC_CONFIG_PATH, "utf8"));
     assert.equal(config.overrideDefaultCompaction, true, "The published default must enable the override");
     const manager = SessionManager.create(workspace, join(workspace, "sessions"));
@@ -167,11 +174,42 @@ try {
       tools: [],
     }));
     const originalSettings = JSON.stringify(settings.getCompactionSettings(fixtureModel));
+    const header = new tui.Container();
+    const resources = new tui.Container();
+    const chat = new tui.Container();
+    chat.addChild(new tui.Text("Current compacted view"));
+    const document = new tui.Container();
+    document.addChild(header);
+    document.addChild(resources);
+    document.addChild(chat);
+    let renderedLines = [];
+    const fakeTui = {
+      mode: "fullscreen",
+      children: [document],
+      terminal: { columns: 140, rows: 45 },
+      viewportTop: 10_000,
+      isFollowingOutput: true,
+      hasOverlay: () => false,
+      requestRender() {},
+      renderNow() { renderedLines = document.render(this.terminal.columns); },
+      scrollBy(lines) { this.viewportTop = Math.max(0, this.viewportTop + lines); this.isFollowingOutput = false; },
+      scrollToTop() { this.viewportTop = 0; this.isFollowingOutput = false; },
+      scrollToBottom() { this.viewportTop = Math.max(0, renderedLines.length - this.terminal.rows); this.isFollowingOutput = true; },
+    };
     await session.bindExtensions({
       mode: "tui",
       uiContext: {
         notify(text, kind) { notifications.push({ text, kind }); },
-        onTerminalInput() { return () => {}; },
+        onTerminalInput(handler) {
+          inputListeners.add(handler);
+          return () => inputListeners.delete(handler);
+        },
+        setWidget(key, content) {
+          widgets.get(key)?.dispose?.();
+          widgets.delete(key);
+          if (typeof content === "function") widgets.set(key, content(fakeTui, themeApi.theme));
+        },
+        getToolsExpanded() { return false; },
         getEditorText() { return ""; },
         setEditorText() {},
       },
@@ -181,6 +219,8 @@ try {
       },
       onError: (error) => errors.push(error),
     });
+    assert.equal(inputListeners.size, 2, "Auto-compact and session-history must both observe input");
+    assert.equal(widgets.size, 1);
     const compactions = () => manager.getBranch().filter((entry) => entry.type === "compaction");
     phase = `${trigger}: compacting through installed Pi`;
     if (trigger === "manual") {
@@ -197,6 +237,9 @@ try {
     // Let pi-vcc's delayed stats notification finish within this session.
     if (timersMocked) mock.timers.tick(500);
     else await pause(550);
+    fakeTui.renderNow();
+    const renderedHistory = tui.stripTerminalSequences(renderedLines.join("\n"));
+    assert.match(renderedHistory, /Restored compacted history:/);
     assert.deepEqual(errors, []);
     assert.deepEqual(prompts, [], "Compaction must not launch an unsolicited agent turn");
     assert.equal(modelRequests, 0, "pi-vcc compaction must not call a model");
@@ -221,6 +264,9 @@ try {
     }
     log(`PASS: ${trigger}; actual pi-vcc checkpoint, zero model requests, no follow-up, max thinking, and preserved settings`);
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    assert.equal(inputListeners.size, 0);
+    assert.equal(widgets.size, 0);
+    assert.equal(document.children.length, 3);
     session.dispose();
     session = undefined;
     if (timersMocked) {

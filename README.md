@@ -57,6 +57,8 @@ Global npm package versions are pinned in `settings.json`; downloaded packages a
 
 The local [auto-compact extension](extensions/auto-compact/README.md) compacts before `/quit` and after 30 minutes of inactivity in interactive sessions. It uses Pi's standard hooks, which select `pi-vcc` when its override is enabled. Without loaded `pi-vcc`, it uses Pi's built-in compactor. A successful `pi-vcc` result prints `Auto-compaction completed with pi-vcc.` before a pending quit. It avoids passing prose that `pi-vcc` would run as a follow-up prompt. Work guards, failure handling, the selected model, and reasoning level remain unchanged. Each compactor retains its own summary and retention policy. Run `/reload` to load the local extension changes.
 
+The local [session-history extension](extensions/session-history/README.md) restores saved entries that Pi hides from its transcript after compaction. Fullscreen mode loads 50 hidden entries initially and 50 more near the history boundary. `Ctrl+Home` loads the complete saved branch. The extension leaves model context, compaction, headers, footers, editors, and installed Pi files unchanged.
+
 The local [cache-rate item](extensions/cache-rate/README.md) replaces Powerline's native cache percentage through its supported custom-status API. It includes cache writes in the total input denominator, displays one decimal place, and preserves the existing cache slot without patching installed packages.
 
 Autoformat and web-search extensions are not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
