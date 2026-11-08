@@ -36,6 +36,7 @@
 !/extensions/vcc-recall-safe/index.ts
 !/extensions/vcc-recall-safe/request.mjs
 !/extensions/vcc-recall-safe/request.test.mjs
+!/extensions/vcc-recall-safe/README.md
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
 !/themes/
