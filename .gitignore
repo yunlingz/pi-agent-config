@@ -32,6 +32,10 @@
 !/extensions/session-history/verify-integration.mjs
 !/extensions/session-history/verify-plugin-compatibility.mjs
 !/extensions/session-history/README.md
+!/extensions/vcc-recall-safe/
+!/extensions/vcc-recall-safe/index.ts
+!/extensions/vcc-recall-safe/request.mjs
+!/extensions/vcc-recall-safe/request.test.mjs
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
 !/themes/
