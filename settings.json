@@ -5,15 +5,24 @@
   "transport": "sse",
   "enabledModels": [
     "existing_gateway/gpt-6.1-sol",
-    "existing_gateway/gpt-6-astra"
+    "existing_gateway/gpt-6-astra",
+    "existing_gateway/gpt-6.1-terra"
   ],
-  "defaultThinkingLevel": "max",
+  "defaultThinkingLevel": "xhigh",
+  "modelThinkingLevels": {
+    "existing_gateway/gpt-6-astra": "medium",
+    "existing_gateway/gpt-6.1-sol": "xhigh",
+    "existing_gateway/gpt-6.1-terra": "max"
+  },
   "compaction": {
     "modelOverrides": {
       "existing_gateway/gpt-6-astra": {
         "reserveTokens": 192000
       },
       "existing_gateway/gpt-6.1-sol": {
+        "reserveTokens": 192000
+      },
+      "existing_gateway/gpt-6.1-terra": {
         "reserveTokens": 192000
       }
     }
