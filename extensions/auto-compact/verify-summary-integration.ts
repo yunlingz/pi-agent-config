@@ -29,7 +29,7 @@ let succeeded = false;
 let shutdowns = 0;
 let summaryCalls = 0;
 let failSummaries = true;
-const requests: { summary: boolean; model: string; effort: string | undefined; limit: number }[] = [];
+const requests: { summary: boolean; model: string; effort: string | undefined; limit: number; input: string }[] = [];
 const failures: string[] = [];
 const notifications: { text: string; kind: string | undefined }[] = [];
 const heartbeat = setInterval(() => {
@@ -80,10 +80,14 @@ const server = createServer(async (request, response) => {
     }
     // Only the installed Responses adapter sends requests to this loopback fixture.
     const body = parseTrustedJson<SummaryPayload>(Buffer.concat(chunks).toString("utf8"));
-    const summary = JSON.stringify(body.input).includes("context summarization assistant");
-    requests.push({ summary, model: body.model, effort: body.reasoning?.effort, limit: body.max_output_tokens });
+    const input = JSON.stringify(body.input);
+    const summary = input.includes("context summarization assistant");
+    requests.push({ summary, model: body.model, effort: body.reasoning?.effort, limit: body.max_output_tokens, input });
     if (summary) {
       summaryCalls += 1;
+      assert.match(input, /## Constraints & Preferences/u);
+      assert.match(input, /## Key Decisions/u);
+      assert.doesNotMatch(input, /Additional focus:/u, "Compaction must use the native prompt without extra instructions");
     }
     answer(response, body, requests.length, summary && failSummaries);
   } catch (error) {
@@ -124,7 +128,7 @@ try {
   });
   await loader.reload();
   assert.deepEqual(loader.getExtensions().errors, []);
-  assert.equal(loader.getExtensions().extensions.length, 1, "This fixture must load auto-compact without pi-vcc");
+  assert.equal(loader.getExtensions().extensions.length, 1, "This fixture must load only auto-compact");
   const manager = SessionManager.create(root, join(root, "sessions"));
   for (let index = 0; index < 24; index += 1) {
     manager.appendMessage({ role: "user", content: `Synthetic historical turn ${index}. ${"Completed fixture evidence. ".repeat(300)}`, timestamp: Date.now() });
@@ -158,6 +162,7 @@ try {
   await session.prompt(`/${QUIT_COMMAND}`);
   await waitFor(() => notifications.some(({ kind }) => kind === "warning") || extensionErrors.length > 0, "native compaction failure");
   assert.equal(summaryCalls, 2, "The trigger-only plugin must not retry or alter native output policy");
+  assert.equal(requests[1].input, requests[0].input, "Manual and pre-quit compaction must send the same native summary input");
   assert.equal(shutdowns, 0);
   assert.equal(manager.getBranch().filter((entry) => entry.type === "compaction").length, 0);
   assert.equal(session.thinkingLevel, "max");
@@ -181,7 +186,6 @@ try {
   const restoredCompaction = restored.getBranch().find((entry) => entry.type === "compaction");
   assert.ok(restoredCompaction);
   assert.equal(restoredCompaction.fromHook, false);
-  assert.equal(notifications.some(({ text }) => text === "Auto-compaction completed with pi-vcc."), false);
   assert.equal(session.thinkingLevel, "max");
   phase = "checking normal requests remain max reasoning";
   await session.prompt("Make one ordinary fixture response.");
@@ -191,7 +195,7 @@ try {
   assert.equal(lastRequest.effort, "xhigh");
   assert.equal(session.thinkingLevel, "max");
   succeeded = true;
-  log(`PASS: installed Pi ${packageInfo.version}; manual/owned summaries preserve model, max reasoning and the model output limit; failure keeps Pi open with no partial checkpoint; explicit retry persists a complete handoff; ${summaryCalls} local summary requests`);
+  log(`PASS: installed Pi ${packageInfo.version}; manual/pre-quit summaries use the same native prompt and preserve model, max reasoning and the model output limit; failure keeps Pi open with no partial checkpoint; explicit retry persists a complete handoff; ${summaryCalls} local summary requests`);
 } finally {
   if (!succeeded) {
     log(JSON.stringify({ phase, requests, shutdowns, summaryCalls, failures, notifications }));

@@ -7,7 +7,6 @@ import {
   inspectHistory,
   routeQuitSubmission,
   type CompactRequest,
-  type CompactResult,
   type ControllerContext,
   type HistoryEntry,
   type HistoryMessage,
@@ -59,7 +58,6 @@ function message(id: string, role: string, fields: Partial<HistoryMessage> = {})
 
 interface HarnessState {
   history: HistoryEntry[];
-  piVccAvailable: boolean;
   idle: boolean;
   pending: boolean;
   calls: CompactRequest[];
@@ -71,18 +69,15 @@ interface HarnessState {
 function harness({
   mode = "tui",
   history = [message("u1", "user"), message("a1", "assistant")],
-  piVccAvailable = false,
-}: { mode?: ControllerContext["mode"]; history?: HistoryEntry[]; piVccAvailable?: boolean } = {}) {
+}: { mode?: ControllerContext["mode"]; history?: HistoryEntry[] } = {}) {
   const clock = new FakeClock();
   const controller = new AutoCompactController({
     now: clock.now,
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
-    hasPiVcc: () => state.piVccAvailable,
   });
   const state: HarnessState = {
     history,
-    piVccAvailable,
     idle: true,
     pending: false,
     calls: [],
@@ -115,8 +110,8 @@ function harness({
   };
   controller.start(ctx);
 
-  function complete({ newMessages = [], remainsBusy = false, details }: {
-    newMessages?: HistoryEntry[]; remainsBusy?: boolean; details?: CompactResult["details"];
+  function complete({ newMessages = [], remainsBusy = false }: {
+    newMessages?: HistoryEntry[]; remainsBusy?: boolean;
   } = {}) {
     state.history.push({ type: "compaction", id: `c${state.calls.length}` });
     state.history.push(...newMessages);
@@ -124,7 +119,7 @@ function harness({
     controller.workFinished();
     const call = state.calls.at(-1);
     assert.ok(call, "A compaction request must precede completion");
-    call.onComplete({ summary: "Test summary", details });
+    call.onComplete();
     clock.advance(0);
   }
 
@@ -167,89 +162,20 @@ test("idle compaction starts at 30 minutes, once per unchanged idle spell", () =
   assert.equal(h.state.calls.length, 0);
   h.clock.advance(1);
   assert.equal(h.state.calls.length, 1);
-  assert.equal(h.state.calls[0].customInstructions, "Write the compaction summary in English.");
+  assert.deepEqual(Object.keys(h.state.calls[0]).sort(), ["onComplete", "onError"]);
   h.complete();
   h.clock.advance(24 * 60 * 60 * 1000);
   assert.equal(h.state.calls.length, 1);
   assert.equal(h.state.shutdowns, 0);
 });
 
-test("pi-vcc receives no prose that it could run as a follow-up prompt", () => {
-  const h = harness({ piVccAvailable: true });
-  h.clock.advance(IDLE_MS);
-  assert.equal(h.state.calls.length, 1);
-  assert.equal(h.state.calls[0].customInstructions, undefined);
-});
-
-test("successful pi-vcc compaction is reported before quit", () => {
-  const h = harness({ piVccAvailable: true });
+test("pre-quit compaction adds no prompt, model, or budget overrides", () => {
+  const h = harness();
   h.controller.requestQuit(h.ctx);
   h.clock.advance(0);
-  assert.equal(h.state.notifications.some(({ text }) => text.includes("completed with pi-vcc")), false);
-  h.complete({ details: { compactor: "pi-vcc" } });
-  assert.ok(h.state.notifications.some(({ text, kind }) =>
-    text === "Auto-compaction completed with pi-vcc." && kind === "info"));
-  assert.equal(h.state.shutdowns, 1);
-});
-
-test("idle compaction reports pi-vcc from the actual result", () => {
-  const h = harness();
-  h.clock.advance(IDLE_MS);
-  h.complete({ details: { compactor: "pi-vcc" } });
-  assert.ok(h.state.notifications.some(({ text }) => text === "Auto-compaction completed with pi-vcc."));
-  assert.equal(h.state.shutdowns, 0);
-});
-
-test("available pi-vcc is not reported when another compactor supplies the result", () => {
-  const h = harness({ piVccAvailable: true });
-  h.clock.advance(IDLE_MS);
-  h.complete({ details: { compactor: "another-compactor" } });
-  assert.equal(h.state.notifications.some(({ text }) => text.includes("completed with pi-vcc")), false);
-});
-
-test("unrecognized completion details do not report pi-vcc", () => {
-  for (const details of [undefined, null, false, 1, "pi-vcc", [], {}, { compactor: null }]) {
-    const h = harness({ piVccAvailable: true });
-    h.clock.advance(IDLE_MS);
-    h.complete({ details });
-    assert.equal(h.state.notifications.some(({ text }) => text.includes("completed with pi-vcc")), false);
-  }
-});
-
-test("pi-vcc availability is checked for each compaction", () => {
-  const h = harness();
-  h.clock.advance(IDLE_MS);
-  assert.equal(h.state.calls[0].customInstructions, "Write the compaction summary in English.");
+  assert.deepEqual(Object.keys(h.state.calls[0]).sort(), ["onComplete", "onError"]);
   h.complete();
-  h.state.piVccAvailable = true;
-  h.state.history.push(message("u2", "user"));
-  h.controller.activity();
-  h.clock.advance(IDLE_MS);
-  assert.equal(h.state.calls[1].customInstructions, undefined);
-  h.complete({ details: { compactor: "pi-vcc" } });
-  h.state.piVccAvailable = false;
-  h.state.history.push(message("u3", "user"));
-  h.controller.activity();
-  h.clock.advance(IDLE_MS);
-  assert.equal(h.state.calls[2].customInstructions, "Write the compaction summary in English.");
-});
-
-test("failed pi-vcc attempts never report successful compaction", () => {
-  const h = harness({ piVccAvailable: true });
-  h.controller.requestQuit(h.ctx);
-  h.clock.advance(0);
-  h.fail("Compaction cancelled");
-  assert.equal(h.state.notifications.some(({ text }) => text.includes("completed with pi-vcc")), false);
-  assert.equal(h.state.shutdowns, 0);
-});
-
-test("late pi-vcc results cannot notify a stopped controller", () => {
-  const h = harness({ piVccAvailable: true });
-  h.clock.advance(IDLE_MS);
-  const callback = h.state.calls[0].onComplete;
-  h.controller.stop();
-  h.ctx.ui.notify = () => { throw new Error("Stale context used"); };
-  assert.doesNotThrow(() => callback({ details: { compactor: "pi-vcc" } }));
+  assert.equal(h.state.shutdowns, 1);
 });
 
 test("typing or other interaction restarts the full idle countdown", () => {
@@ -481,7 +407,7 @@ test("shutdown cleanup clears timers and ignores late compaction callbacks", () 
   const callback = h.state.calls[0].onComplete;
   h.controller.stop();
   h.ctx.ui.notify = () => { throw new Error("stale context used"); };
-  assert.doesNotThrow(() => callback({ summary: "late result" }));
+  assert.doesNotThrow(() => callback());
   h.clock.advance(24 * 60 * 60 * 1000);
   assert.equal(h.clock.timers.size, 0);
   assert.equal(h.state.shutdowns, 0);

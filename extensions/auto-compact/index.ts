@@ -3,9 +3,7 @@ import { getKeybindings } from "@earendil-works/pi-tui";
 import { AutoCompactController, QUIT_COMMAND, routeQuitSubmission } from "./controller.ts";
 
 export default function (pi: ExtensionAPI) {
-  const controller = new AutoCompactController({
-    hasPiVcc: () => pi.getCommands().some((command) => command.name === "pi-vcc"),
-  });
+  const controller = new AutoCompactController();
   let unsubscribeInput: (() => void) | undefined;
 
   pi.registerCommand(QUIT_COMMAND, {

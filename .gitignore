@@ -5,7 +5,6 @@
 !TYPESCRIPT.md
 !models.json
 !settings.json
-!pi-vcc-config.json
 !README.md
 !/tsconfig.json
 !/scripts/
@@ -22,7 +21,6 @@
 !/extensions/auto-compact/controller.test.ts
 !/extensions/auto-compact/verify-summary-integration.ts
 !/extensions/auto-compact/verify-integration.ts
-!/extensions/auto-compact/verify-vcc-integration.ts
 !/extensions/auto-compact/README.md
 !/extensions/cache-rate/
 !/extensions/cache-rate/index.ts
@@ -30,19 +28,6 @@
 !/extensions/cache-rate/cache-rate.test.ts
 !/extensions/cache-rate/verify-integration.ts
 !/extensions/cache-rate/README.md
-!/extensions/session-history/
-!/extensions/session-history/index.ts
-!/extensions/session-history/history-transcript.ts
-!/extensions/session-history/history-window.ts
-!/extensions/session-history/history-window.test.ts
-!/extensions/session-history/verify-integration.ts
-!/extensions/session-history/verify-plugin-compatibility.ts
-!/extensions/session-history/README.md
-!/extensions/vcc-recall-safe/
-!/extensions/vcc-recall-safe/index.ts
-!/extensions/vcc-recall-safe/request.ts
-!/extensions/vcc-recall-safe/request.test.ts
-!/extensions/vcc-recall-safe/README.md
 !/extensions/web-search/
 !/extensions/web-search/index.ts
 !/extensions/web-search/types.ts

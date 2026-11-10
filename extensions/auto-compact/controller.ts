@@ -11,14 +11,8 @@ export type HistoryEntry =
   | { type: "message"; id: string; message: HistoryMessage }
   | { type: Exclude<SessionEntry["type"], "message">; id: string };
 
-export interface CompactResult {
-  summary?: string;
-  details?: unknown;
-}
-
 export interface CompactRequest {
-  customInstructions?: string;
-  onComplete(result: CompactResult): void;
+  onComplete(): void;
   onError(error: Error): void;
 }
 
@@ -35,7 +29,6 @@ interface ControllerOptions {
   now?: () => number;
   setTimer?: (callback: () => void, delay: number) => NodeJS.Timeout;
   clearTimer?: (handle: NodeJS.Timeout) => void;
-  hasPiVcc?: () => boolean;
 }
 
 interface CompactionAttempt {
@@ -89,7 +82,6 @@ export class AutoCompactController {
   now: () => number;
   setTimer: NonNullable<ControllerOptions["setTimer"]>;
   clearTimer: NonNullable<ControllerOptions["clearTimer"]>;
-  hasPiVcc: () => boolean;
   generation: number;
   context: ControllerContext | undefined;
   timer: NodeJS.Timeout | undefined;
@@ -107,12 +99,10 @@ export class AutoCompactController {
     now = Date.now,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
-    hasPiVcc = () => false,
   }: ControllerOptions = {}) {
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
-    this.hasPiVcc = hasPiVcc;
     this.generation = 0;
     this.context = undefined;
     this.timer = undefined;
@@ -326,7 +316,7 @@ export class AutoCompactController {
       ? "Compacting the session before exit."
       : "Compacting the session after 30 minutes of inactivity.", "info");
 
-    const finish = (error?: unknown, result?: CompactResult) => {
+    const finish = (error?: unknown) => {
       if (this.compaction !== attempt || this.generation !== attempt.generation) {
         return;
       }
@@ -344,12 +334,8 @@ export class AutoCompactController {
           : "Idle compaction failed or was cancelled. Use /compact to retry.", "warning");
         return;
       }
-      const details = result?.details;
       if (noop) {
         this.noopMarker = attempt.marker;
-      } else if (typeof details === "object" && details !== null
-        && "compactor" in details && details.compactor === "pi-vcc") {
-        ctx.ui.notify("Auto-compaction completed with pi-vcc.", "info");
       }
       if (this.quitting) {
         // Recheck after Pi flushes input queued during compaction. Any
@@ -364,9 +350,7 @@ export class AutoCompactController {
 
     try {
       ctx.compact({
-        // pi-vcc treats prose instructions as an agent follow-up prompt.
-        customInstructions: this.hasPiVcc() ? undefined : "Write the compaction summary in English.",
-        onComplete: (result) => finish(undefined, result),
+        onComplete: () => finish(),
         onError: (error) => finish(error),
       });
     } catch (error) {

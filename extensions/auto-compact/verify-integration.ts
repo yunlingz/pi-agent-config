@@ -99,7 +99,7 @@ try {
       (pi) => {
         pi.on("session_before_compact", async (event) => {
           compactionHooks += 1;
-          assert.equal(event.customInstructions, "Write the compaction summary in English.");
+          assert.equal(event.customInstructions, undefined, "Auto-compact must use Pi's prompt without additional instructions");
           return await new Promise<SessionBeforeCompactResult>((resolveSummary) => {
             let settled = false;
             const finishSummary = (cancel = false) => {
@@ -110,7 +110,7 @@ try {
               event.signal.removeEventListener("abort", cancelSummary);
               resolveSummary(cancel ? { cancel: true } : {
                 compaction: {
-                  summary: "Native fixture compaction completed in English.",
+                  summary: "Fixture compaction completed.",
                   firstKeptEntryId: event.preparation.firstKeptEntryId,
                   tokensBefore: event.preparation.tokensBefore,
                 },
@@ -237,7 +237,7 @@ try {
   const restored = SessionManager.open(savedSession);
   const compactions = restored.getBranch().filter((entry) => entry.type === "compaction");
   assert.equal(compactions.length, 1);
-  assert.equal(compactions[0].summary, "Native fixture compaction completed in English.");
+  assert.equal(compactions[0].summary, "Fixture compaction completed.");
   assert.equal(modelRequests, 0);
   assert.deepEqual(extensionErrors, []);
   const runner = session.extensionRunner;

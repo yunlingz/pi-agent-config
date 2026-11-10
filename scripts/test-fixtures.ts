@@ -37,22 +37,11 @@ export interface FooterSegmentsModule {
   }): { visible: boolean; content: string };
 }
 
-export type TestWidget = Component & { dispose?(): void };
-export type WidgetContent = string[] | ((tui: TUI, theme: Theme) => TestWidget) | undefined;
-
 function unavailable(): never {
   throw new Error("This UI operation is outside the integration fixture.");
 }
 
-export interface TestTUI extends TUI {
-  viewportTop: number;
-  isFollowingOutput: boolean;
-  scrollBy(lines: number): void;
-  scrollToTop(): void;
-  scrollToBottom(): void;
-}
-
-export function testTUI(document: Component, onRender: (lines: string[]) => void = () => {}): TestTUI {
+export function testTUI(document: Component): TUI {
   const terminal: Terminal = {
     columns: 140,
     rows: 45,
@@ -71,14 +60,11 @@ export function testTUI(document: Component, onRender: (lines: string[]) => void
     setProgress: unavailable,
     setProgramStatus: unavailable,
   };
-  let renderedLines: string[] = [];
   return {
     mode: "fullscreen",
     children: [document],
     terminal,
     fullRedraws: 0,
-    viewportTop: 10_000,
-    isFollowingOutput: true,
     addChild: unavailable,
     removeChild: unavailable,
     clear: unavailable,
@@ -101,22 +87,9 @@ export function testTUI(document: Component, onRender: (lines: string[]) => void
     invalidate: () => document.invalidate(),
     requestRender() {},
     renderNow() {
-      renderedLines = document.render(terminal.columns);
-      onRender(renderedLines);
+      document.render(terminal.columns);
     },
-    scrollBy(lines: number) {
-      this.viewportTop = Math.max(0, this.viewportTop + lines);
-      this.isFollowingOutput = false;
-    },
-    scrollToTop() {
-      this.viewportTop = 0;
-      this.isFollowingOutput = false;
-    },
-    scrollToBottom() {
-      this.viewportTop = Math.max(0, renderedLines.length - terminal.rows);
-      this.isFollowingOutput = true;
-    },
-  } satisfies TestTUI;
+  };
 }
 
 export function testUI(session: AgentSession, overrides: Partial<ExtensionUIContext>): ExtensionUIContext {
