@@ -42,10 +42,10 @@ Pi's native state changes are preserved: neutral while running, muted dark green
 
 ## Validation
 
-From this repository, run:
+Runtime check from this repository:
 
 ```text
-node themes/verify.mjs <installed-pi-package-directory>
+node themes/verify.ts <installed-pi-package-directory>
 ```
 
 This checks the installed schema and native loader, all 56 color roles in truecolor and 256-color modes, text contrast on representative backgrounds, card/canvas separation, native tool-state transitions, neutral fallback shades, and semantic footer colors. It uses only the installed Pi's dependencies; it makes no model or network requests.

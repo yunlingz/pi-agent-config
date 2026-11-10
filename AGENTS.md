@@ -234,7 +234,21 @@ Review complex or high-risk content more closely. Do not add routine model reque
 - **Private values**
   - Keep proxy and credential values out of logs, progress output, and responses.
 
-## Temporary scripts: use Node.js, not Python
+## Use TypeScript for local Pi code
+
+- Use TypeScript for maintained local Pi extensions, skill scripts, tests, verification tools, and executable examples.
+- Before coding, read [TYPESCRIPT.md](TYPESCRIPT.md) and the shared `tsconfig.json` in the active global agent directory.
+- Use their shared rules and design types and fixtures before implementation.
+- Reuse SDK types and trust established contracts; validate genuinely untrusted data once instead of building duplicate decoders.
+- Node.js type stripping is not static checking; run strict static checks and relevant runtime tests before reporting completion.
+- Keep checking tools and declarations in task-owned temporary directories, not repository dependencies.
+- Keep common TypeScript guidance centralized here and in `TYPESCRIPT.md`; do not duplicate it in skills or extension instructions.
+- Keep README files descriptive; agent procedures must use instruction files, not depend on README content.
+- Keep skill instructions in Markdown and configuration data in its required format.
+- Leave installed third-party code and generated artifacts unchanged.
+- Temporary helpers follow the separate script policy below.
+
+## Temporary scripts: use Node.js and match effort to risk
 
 - **Scope**
   - These restrictions apply only to new temporary helpers and command orchestration.
@@ -242,14 +256,18 @@ Review complex or high-risk content more closely. Do not add routine model reque
 - **Runtime and language**
   - Prefer dedicated tools and native executables when sufficient.
   - Do not wrap simple commands in scripts solely for monitoring.
-  - Write temporary helpers and command orchestration in JavaScript on every platform.
-    - Run these helpers with Node.js.
-    - Prefer `.mjs` helpers. Never use Python for temporary scripts.
+  - Prefer plain JavaScript with Node.js for small, disposable helpers and simple command orchestration.
+    - Prefer ESM `.mjs` files when a helper needs a file.
+    - Do not add a compiler or static-checking setup for a small JavaScript helper.
+  - When a helper is large or complex, use TypeScript if static checks materially improve safety or correctness.
+    - Run `.ts` helpers directly with Node.js and check them under the shared TypeScript rules.
+  - Keep maintained local Pi code in TypeScript; this exception applies only to disposable helpers.
+  - Do not use Python for temporary scripts.
   - A shell may launch Node.js or native executables.
   - Do not write helper logic in PowerShell, CMD, Bash, Git Bash, or another shell language.
     - This includes file operations, loops, branching, pipelines, and orchestration.
   - If Node.js cannot meet a temporary scripting need, explain the limitation.
-    - Ask before using another JavaScript runtime.
+    - Ask before using another runtime.
 - **Implementation**
   - Prefer Node.js built-ins such as `node:fs`, `node:path`, `node:os`, and `node:child_process`.
   - Use built-in `fetch` when suitable.

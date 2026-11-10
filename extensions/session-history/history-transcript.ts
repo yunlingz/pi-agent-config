@@ -1,3 +1,4 @@
+import type { UserMessage } from "@earendil-works/pi-ai";
 import {
   AssistantMessageComponent,
   BashExecutionComponent,
@@ -8,6 +9,7 @@ import {
   UserMessageComponent,
   getMarkdownTheme,
   sessionEntryToContextMessages,
+  truncateTail,
   type SessionEntry,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
@@ -26,10 +28,13 @@ interface HistorySnapshot {
 }
 
 class StatusLine implements Component {
-  constructor(
-    private readonly text: () => string,
-    private readonly theme: Theme,
-  ) {}
+  private readonly text: () => string;
+  private readonly theme: Theme;
+
+  constructor(text: () => string, theme: Theme) {
+    this.text = text;
+    this.theme = theme;
+  }
 
   render(width: number): string[] {
     return [truncateToWidth(` ${this.theme.fg("muted", this.text())}`, width)];
@@ -38,7 +43,7 @@ class StatusLine implements Component {
   invalidate(): void {}
 }
 
-function userText(content: unknown): string {
+function userText(content: UserMessage["content"]): string {
   if (typeof content === "string") {
     return content;
   }
@@ -66,11 +71,15 @@ export class HistoryTranscript implements Component {
   private snapshot: HistorySnapshot = { selected: [], remaining: 0, total: 0 };
   private expanded = false;
 
-  constructor(
-    private readonly ui: TUI,
-    private readonly theme: Theme,
-    private readonly cwd: string,
-  ) {}
+  private readonly ui: TUI;
+  private readonly theme: Theme;
+  private readonly cwd: string;
+
+  constructor(ui: TUI, theme: Theme, cwd: string) {
+    this.ui = ui;
+    this.theme = theme;
+    this.cwd = cwd;
+  }
 
   update(snapshot: HistorySnapshot, expanded: boolean): void {
     this.snapshot = snapshot;
@@ -204,7 +213,7 @@ export class HistoryTranscript implements Component {
         bash.setComplete(
           message.exitCode,
           message.cancelled,
-          message.truncated ? { truncated: true } : undefined,
+          message.truncated ? { ...truncateTail(message.output), truncated: true } : undefined,
           message.fullOutputPath,
         );
         bash.setExpanded(this.expanded);

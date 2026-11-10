@@ -74,13 +74,13 @@ The source comparison confirms that Pi 1.4.0 did not introduce the selector beha
 
 ## Checks
 
-From the global agent repository:
+Runtime checks from the global agent repository:
 
 ```text
-node --test extensions/session-history/history-window.test.mjs
-node extensions/session-history/verify-integration.mjs Q:/.tools/.npm-global/node_modules/@earendil-works/pi-coding-agent
-node extensions/session-history/verify-plugin-compatibility.mjs Q:/.tools/.npm-global/node_modules/@earendil-works/pi-coding-agent
-node extensions/auto-compact/verify-vcc-integration.mjs Q:/.tools/.npm-global/node_modules/@earendil-works/pi-coding-agent
+node --test extensions/session-history/history-window.test.ts
+node extensions/session-history/verify-integration.ts <installed-pi-package-directory>
+node extensions/session-history/verify-plugin-compatibility.ts <installed-pi-package-directory>
+node extensions/auto-compact/verify-vcc-integration.ts <installed-pi-package-directory>
 ```
 
 The checks use synthetic history and local fixtures. They make no model or network requests. They remove their temporary files.

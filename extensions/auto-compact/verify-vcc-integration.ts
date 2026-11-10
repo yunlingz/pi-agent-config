@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { mock } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { IDLE_MS, QUIT_COMMAND } from "./controller.mjs";
+import { IDLE_MS, QUIT_COMMAND } from "./controller.ts";
+import type { Model } from "@earendil-works/pi-ai";
+import type { AgentSession, SessionManager, TerminalInputHandler } from "@earendil-works/pi-coding-agent";
+import { testTUI, testUI, type TestWidget, type WidgetContent } from "../../scripts/test-fixtures.ts";
+import { isRecord, readJson, readPackageInfo } from "../../scripts/verification-data.ts";
 
 const piPackage = resolve(process.argv[2] ?? "");
 const agentDirectory = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 const vccDirectory = resolve(process.argv[3] ?? join(agentDirectory, "npm", "node_modules", "@sting8k", "pi-vcc"));
 const historyDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../session-history");
-const piInfo = JSON.parse(readFileSync(join(piPackage, "package.json"), "utf8"));
-const vccInfo = JSON.parse(readFileSync(join(vccDirectory, "package.json"), "utf8"));
+const piInfo = readPackageInfo(join(piPackage, "package.json"));
+const vccInfo = readPackageInfo(join(vccDirectory, "package.json"));
 assert.equal(piInfo.name, "@earendil-works/pi-coding-agent");
 assert.equal(vccInfo.name, "@sting8k/pi-vcc");
 const root = mkdtempSync(join(tmpdir(), "pi-auto-compact-vcc-"));
@@ -21,22 +25,22 @@ const previousConfigPath = process.env.PI_VCC_CONFIG_PATH;
 const previousOffline = process.env.PI_OFFLINE;
 const previousTelemetry = process.env.PI_TELEMETRY;
 let phase = "loading installed Pi";
-let session;
+let session: AgentSession | undefined;
 let timersMocked = false;
 let succeeded = false;
 const heartbeat = setInterval(() => {
   process.stderr.write(`[${new RealDate().toISOString()}] pi-vcc integration: ${phase}\n`);
 }, 20_000);
 
-function log(text) {
+function log(text: string) {
   process.stderr.write(`[${new RealDate().toISOString()}] ${text}\n`);
 }
 
-async function pause(duration) {
+async function pause(duration: number) {
   await new Promise((resolveWait) => realSetTimeout(resolveWait, duration));
 }
 
-async function waitFor(predicate, label) {
+async function waitFor(predicate: () => unknown, label: string) {
   const deadline = performance.now() + 5000;
   while (!predicate()) {
     if (timersMocked) mock.timers.tick(0);
@@ -45,7 +49,7 @@ async function waitFor(predicate, label) {
   }
 }
 
-const fixtureModel = {
+const fixtureModel: Model<"openai-responses"> = {
   id: "vcc-compaction-fixture",
   name: "VCC compaction fixture",
   provider: "fixture",
@@ -62,7 +66,7 @@ const fixtureModel = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 };
 
-function appendHistory(manager) {
+function appendHistory(manager: SessionManager) {
   for (let turn = 0; turn < 20; turn += 1) {
     manager.appendMessage({
       role: "user",
@@ -89,9 +93,9 @@ try {
   log(`Checking installed Pi ${piInfo.version} and pi-vcc ${vccInfo.version}; temporary workspace: ${root}`);
   process.env.PI_OFFLINE = "1";
   process.env.PI_TELEMETRY = "0";
-  const sdk = await import(pathToFileURL(join(piPackage, "dist", "index.js")).href);
-  const tui = await import(pathToFileURL(join(piPackage, "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
-  const themeApi = await import(pathToFileURL(join(piPackage, "dist", "modes", "interactive", "theme", "theme.js")).href);
+  const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(piPackage, "dist", "index.js")).href);
+  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(join(piPackage, "node_modules", "@earendil-works", "pi-tui", "dist", "index.js")).href);
+  const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(piPackage, "dist", "modes", "interactive", "theme", "theme.js")).href);
   themeApi.initTheme("dark", false);
   const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = sdk;
   for (const trigger of ["manual", "quit", "idle"]) {
@@ -100,13 +104,13 @@ try {
     const agent = join(workspace, "agent");
     mkdirSync(agent, { recursive: true });
     process.env.PI_VCC_CONFIG_PATH = join(agent, "pi-vcc-config.json");
-    const errors = [];
-    const notifications = [];
-    const notificationsAtShutdown = [];
-    const instructions = [];
-    const prompts = [];
-    const inputListeners = new Set();
-    const widgets = new Map();
+    const errors: unknown[] = [];
+    const notifications: { text: string; kind: string | undefined }[] = [];
+    const notificationsAtShutdown: typeof notifications = [];
+    const instructions: (string | undefined)[] = [];
+    const prompts: (string | undefined)[] = [];
+    const inputListeners = new Set<TerminalInputHandler>();
+    const widgets = new Map<string, TestWidget>();
     let shutdowns = 0;
     let modelRequests = 0;
     const settings = SettingsManager.inMemory({
@@ -123,7 +127,7 @@ try {
       allowModelNetwork: false,
       refreshOnCreate: false,
     });
-    for (const method of ["stream", "complete", "streamSimple", "completeSimple"]) {
+    for (const method of ["stream", "complete", "streamSimple", "completeSimple"] as const) {
       modelRuntime[method] = () => {
         modelRequests += 1;
         throw new Error("This fixture must not make model requests");
@@ -152,13 +156,16 @@ try {
       additionalExtensionPaths: paths,
       extensionFactories: [(pi) => {
         pi.on("session_before_compact", (event) => { instructions.push(event.customInstructions); });
-        pi.on("before_agent_start", (event) => { prompts.push(event.prompt); });
+        pi.on("before_agent_start", (event) => {
+          prompts.push(event.messageType === "user" ? event.prompt : undefined);
+        });
       }],
     });
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
     assert.equal(loader.getExtensions().extensions.length, 4);
-    const config = JSON.parse(readFileSync(process.env.PI_VCC_CONFIG_PATH, "utf8"));
+    const config = readJson(process.env.PI_VCC_CONFIG_PATH);
+    assert.ok(isRecord(config));
     assert.equal(config.overrideDefaultCompaction, true, "The published default must enable the override");
     const manager = SessionManager.create(workspace, join(workspace, "sessions"));
     appendHistory(manager);
@@ -182,29 +189,17 @@ try {
     document.addChild(header);
     document.addChild(resources);
     document.addChild(chat);
-    let renderedLines = [];
-    const fakeTui = {
-      mode: "fullscreen",
-      children: [document],
-      terminal: { columns: 140, rows: 45 },
-      viewportTop: 10_000,
-      isFollowingOutput: true,
-      hasOverlay: () => false,
-      requestRender() {},
-      renderNow() { renderedLines = document.render(this.terminal.columns); },
-      scrollBy(lines) { this.viewportTop = Math.max(0, this.viewportTop + lines); this.isFollowingOutput = false; },
-      scrollToTop() { this.viewportTop = 0; this.isFollowingOutput = false; },
-      scrollToBottom() { this.viewportTop = Math.max(0, renderedLines.length - this.terminal.rows); this.isFollowingOutput = true; },
-    };
+    let renderedLines: string[] = [];
+    const fakeTui = testTUI(document, (lines) => { renderedLines = lines; });
     await session.bindExtensions({
       mode: "tui",
-      uiContext: {
+      uiContext: testUI(session, {
         notify(text, kind) { notifications.push({ text, kind }); },
         onTerminalInput(handler) {
           inputListeners.add(handler);
           return () => inputListeners.delete(handler);
         },
-        setWidget(key, content) {
+        setWidget(key: string, content: WidgetContent) {
           widgets.get(key)?.dispose?.();
           widgets.delete(key);
           if (typeof content === "function") widgets.set(key, content(fakeTui, themeApi.theme));
@@ -212,7 +207,7 @@ try {
         getToolsExpanded() { return false; },
         getEditorText() { return ""; },
         setEditorText() {},
-      },
+      }),
       shutdownHandler() {
         shutdowns += 1;
         notificationsAtShutdown.push(...notifications);
@@ -246,13 +241,19 @@ try {
     assert.deepEqual(instructions, [undefined], "Prose becomes a pi-vcc follow-up prompt");
     assert.equal(compactions().length, 1);
     assert.equal(compactions()[0].fromHook, true);
-    assert.equal(compactions()[0].details.compactor, "pi-vcc");
+    const details = compactions()[0].details;
+    assert.ok(details && typeof details === "object" && "compactor" in details);
+    assert.equal(details.compactor, "pi-vcc");
     assert.ok(compactions()[0].summary.trim());
-    assert.equal(session.model.id, fixtureModel.id);
+    assert.equal(session.model?.id, fixtureModel.id);
     assert.equal(session.thinkingLevel, "max");
     assert.equal(JSON.stringify(settings.getCompactionSettings(fixtureModel)), originalSettings);
-    const restored = SessionManager.open(manager.getSessionFile());
-    assert.equal(restored.getBranch().filter((entry) => entry.type === "compaction")[0].details.compactor, "pi-vcc");
+    const sessionFile = manager.getSessionFile();
+    assert.ok(sessionFile);
+    const restored = SessionManager.open(sessionFile);
+    const restoredDetails = restored.getBranch().filter((entry) => entry.type === "compaction")[0].details;
+    assert.ok(restoredDetails && typeof restoredDetails === "object" && "compactor" in restoredDetails);
+    assert.equal(restoredDetails.compactor, "pi-vcc");
     if (trigger !== "manual") {
       assert.ok(notifications.some(({ text, kind }) =>
         text === "Auto-compaction completed with pi-vcc." && kind === "info"));
@@ -263,7 +264,9 @@ try {
       assert.equal(shutdowns, 0);
     }
     log(`PASS: ${trigger}; actual pi-vcc checkpoint, zero model requests, no follow-up, max thinking, and preserved settings`);
-    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    const runner = session.extensionRunner;
+    assert.ok(runner);
+    await runner.emit({ type: "session_shutdown", reason: "quit" });
     assert.equal(inputListeners.size, 0);
     assert.equal(widgets.size, 0);
     assert.equal(document.children.length, 3);
@@ -281,7 +284,7 @@ try {
   try {
     if (session) {
       await session.abort();
-      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
       session.dispose();
     }
   } finally {

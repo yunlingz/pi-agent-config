@@ -1,21 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { STATUS_KEY } from "./cache-rate.mjs";
+import { STATUS_KEY } from "./cache-rate.ts";
+import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
+import type { AgentSession, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { testUI, type FooterConfigModule, type FooterPresetsModule, type FooterSegmentsModule } from "../../scripts/test-fixtures.ts";
+import { readJson, readPackageInfo } from "../../scripts/verification-data.ts";
 
 const packageArgument = process.argv[2];
-assert.ok(packageArgument, "Usage: node verify-integration.mjs <installed-pi-package-directory>");
+assert.ok(packageArgument, "Usage: node verify-integration.ts <installed-pi-package-directory>");
 const packageDirectory = resolve(packageArgument);
 const extensionDirectory = dirname(fileURLToPath(import.meta.url));
 const agentDirectory = resolve(extensionDirectory, "../..");
-const packageInfo = JSON.parse(readFileSync(join(packageDirectory, "package.json"), "utf8"));
+const packageInfo = readPackageInfo(join(packageDirectory, "package.json"));
 assert.equal(packageInfo.name, "@earendil-works/pi-coding-agent");
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "pi-cache-rate-check-"));
 const require = createRequire(pathToFileURL(join(packageDirectory, "package.json")));
-let session;
+let session: AgentSession | undefined;
 let phase = "loading the installed Pi";
 let passed = false;
 let networkAttempts = 0;
@@ -23,9 +27,9 @@ const originalFetch = globalThis.fetch;
 const heartbeat = setInterval(() => {
   process.stderr.write(`[${new Date().toISOString()}] Cache-rate integration: ${phase}\n`);
 }, 20_000);
-const statuses = new Map();
-const updates = [];
-const errors = [];
+const statuses = new Map<string, string>();
+const updates: { key: string; value: string | undefined }[] = [];
+const errors: unknown[] = [];
 
 globalThis.fetch = async () => {
   networkAttempts += 1;
@@ -33,8 +37,8 @@ globalThis.fetch = async () => {
 };
 
 try {
-  const sdk = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
-  const ai = await import(pathToFileURL(join(packageDirectory, "node_modules/@earendil-works/pi-ai/dist/index.js")).href);
+  const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
+  const ai: typeof import("@earendil-works/pi-ai") = await import(pathToFileURL(join(packageDirectory, "node_modules/@earendil-works/pi-ai/dist/index.js")).href);
   const settings = sdk.SettingsManager.inMemory({ extensions: ["-builtin:mcp"], packages: [], compaction: { enabled: false } });
   const modelRuntime = await sdk.ModelRuntime.create({
     authPath: join(temporaryDirectory, "auth.json"), modelsPath: null,
@@ -57,7 +61,7 @@ try {
       const stream = ai.createAssistantMessageEventStream();
       const fixture = fixtures[calls++];
       assert.ok(fixture, "Only the two planned fixture requests may run");
-      const message = {
+      const message: AssistantMessage = {
         role: "assistant", api: model.api, provider: model.provider, model: model.id,
         timestamp: Date.now(), stopReason: "pending", content: [],
         usage: { ...fixture, output: 1, totalTokens: fixture.input + fixture.cacheRead + fixture.cacheWrite + 1,
@@ -68,7 +72,7 @@ try {
           await options.onPayload?.({ simulated: true }, model);
           await options.onResponse?.({ status: 200, headers: {} }, model);
           stream.push({ type: "start", partial: message });
-          const text = { type: "text", text: "" };
+          const text: TextContent = { type: "text", text: "" };
           message.content.push(text);
           stream.push({ type: "text_start", contentIndex: 0, partial: message });
           text.text = "Fixture complete.";
@@ -78,7 +82,7 @@ try {
           stream.push({ type: "done", reason: "stop", message });
         } catch (error) {
           message.stopReason = "error";
-          message.errorMessage = error.message;
+          message.errorMessage = error instanceof Error ? error.message : "Fixture stream failed.";
           stream.push({ type: "error", reason: "error", error: message });
         } finally {
           stream.end();
@@ -103,11 +107,11 @@ try {
   }));
   await session.bindExtensions({
     mode: "tui",
-    uiContext: { setStatus(key, value) {
+    uiContext: testUI(session, { setStatus(key, value) {
       updates.push({ key, value });
       if (value === undefined) statuses.delete(key);
       else statuses.set(key, value);
-    } },
+    } }),
     onError: (error) => errors.push(error),
   });
   assert.equal(statuses.has(STATUS_KEY), false);
@@ -124,7 +128,7 @@ try {
   assert.deepEqual(errors, []);
 
   phase = "checking installed Powerline parsing, layout, and rendering";
-  const { createJiti } = await import(pathToFileURL(require.resolve("jiti")).href);
+  const { createJiti }: typeof import("jiti") = await import(pathToFileURL(require.resolve("jiti")).href);
   const jiti = createJiti(import.meta.url, {
     fsCache: join(temporaryDirectory, "jiti-cache"),
     alias: {
@@ -134,16 +138,16 @@ try {
     },
   });
   const footerDirectory = join(agentDirectory, "npm/node_modules/pi-powerline-footer");
-  const configApi = await jiti.import(join(footerDirectory, "powerline-config.ts"));
-  const presets = await jiti.import(join(footerDirectory, "presets.ts"));
-  const segments = await jiti.import(join(footerDirectory, "segments.ts"));
-  const globalSettings = JSON.parse(readFileSync(join(agentDirectory, "settings.json"), "utf8"));
+  const configApi = await jiti.import<FooterConfigModule>(join(footerDirectory, "powerline-config.ts"));
+  const presets = await jiti.import<FooterPresetsModule>(join(footerDirectory, "presets.ts"));
+  const segments = await jiti.import<FooterSegmentsModule>(join(footerDirectory, "segments.ts"));
+  const globalSettings = readJson<ReturnType<SettingsManager["getGlobalSettings"]> & { powerline?: unknown }>(join(agentDirectory, "settings.json"));
   const config = configApi.parsePowerlineConfig(globalSettings.powerline, Object.keys(presets.PRESETS));
   assert.deepEqual(config.invalidLayoutSegments, []);
   assert.deepEqual(config.invalidDisabledSegments, []);
   const preset = presets.getPreset(config.preset);
   const layout = configApi.mergeSegmentsWithCustomItems(preset, config.customItems, config);
-  const expectedLeft = preset.leftSegments.flatMap((id) => {
+  const expectedLeft = preset.leftSegments.flatMap((id: string) => {
     if (id === "thinking") return [id, "custom:web_search"];
     return [id === "cache_read" ? "custom:cache_rate" : id];
   });
@@ -153,13 +157,13 @@ try {
   assert.ok(config.disabledSegments.includes("cache_read"));
   const hidden = configApi.collectHiddenExtensionStatusKeys(config.customItems);
   assert.ok(hidden.has(STATUS_KEY));
-  const themeApi = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
-  const tui = await import(pathToFileURL(require.resolve("@earendil-works/pi-tui")).href);
-  for (const mode of ["truecolor", "256color"]) {
+  const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
+  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(require.resolve("@earendil-works/pi-tui")).href);
+  for (const mode of ["truecolor", "256color"] as const) {
     const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci_dark.json"), mode);
     const context = {
       theme, colors: preset.colors,
-      customItemsById: new Map(config.customItems.map((item) => [item.id, item])),
+      customItemsById: new Map(config.customItems.map((item: { id: string }) => [item.id, item])),
       extensionStatuses: statuses, hiddenExtensionStatusKeys: hidden,
     };
     const rendered = segments.renderSegment("custom:cache_rate", context);
@@ -169,7 +173,9 @@ try {
     assert.equal(segments.renderSegment("extension_statuses", context).visible, false);
   }
   statuses.set("other-extension", "Other status");
-  await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+  const runner = session.extensionRunner;
+  assert.ok(runner);
+  await runner.emit({ type: "session_shutdown", reason: "quit" });
   assert.equal(statuses.has(STATUS_KEY), false);
   assert.equal(statuses.get("other-extension"), "Other status");
   assert.equal(networkAttempts, 0);
@@ -180,7 +186,7 @@ try {
   globalThis.fetch = originalFetch;
   try {
     if (session) {
-      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
       session.dispose();
     }
   } finally {

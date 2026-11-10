@@ -1,79 +1,138 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { citationSource, cleanText, renderCitations } from "./citations.ts";
-import { createBudgetedFetch, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, runSearch, searchPayload } from "./search-request.ts";
-import { registerWebSearch, SEARCH_GUIDELINES, STATE_TYPE, TOOL_NAME } from "./web-search.ts";
+import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { SearchParameters, SearchResult } from "./types.ts";
+import { createBudgetedFetch, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, runSearch, searchPayload, type SearchRegistry } from "./search-request.ts";
+import { registerWebSearch, SEARCH_GUIDELINES, STATE_TYPE, TOOL_NAME, type RegisteredSearchTool, type SearchContext, type SearchEntry, type SearchExtension, type SearchStartEvent } from "./web-search.ts";
 
-const MODELS = [["gpt-6-astra", "medium"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]];
+const MODELS = [["gpt-6-astra", "medium"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
+const PARAMETERS = {
+  "~kind": "Object", type: "object", required: ["query"],
+  properties: {
+    query: { "~kind": "String", type: "string" },
+    context: { "~kind": "String", type: "string", "~optional": true },
+  },
+} satisfies SearchParameters;
+
+function modelFixture(id: string = "model"): Model<Api> {
+  return {
+    id, name: id, provider: "existing_gateway", api: "openai-responses", baseUrl: "https://example.com/v1",
+    reasoning: true, input: ["text"], contextWindow: 1050000, maxTokens: 128000,
+    cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+  };
+}
+
+function firstText(result: SearchResult): string {
+  const part = result.content[0];
+  assert.equal(part.type, "text");
+  assert.ok(part.type === "text");
+  return part.text;
+}
+
+interface CapturedSearch {
+  model: Model<Api>;
+  context: Context;
+  options: ModelsSimpleStreamOptions;
+}
 const TEXT = "The release is available.";
 const CITATION = { type: "url_citation", title: "Release notes", url: "https://example.com/releases", start_index: 0, end_index: TEXT.length };
 const USAGE = { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120, cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 } };
 
-function harness({ id = MODELS[0][0], mode = "tui", active = true } = {}) {
-  const handlers = new Map();
-  const commands = new Map();
-  const state = { branch: [], statuses: [], notifications: [], idle: true, active: ["read"], tools: new Map() };
-  const pi = {
+function harness({ id = MODELS[0][0], mode = "tui", active = true }: { id?: string; mode?: SearchContext["mode"]; active?: boolean } = {}) {
+  const handlers = new Map<string, (event: SearchStartEvent, ctx: SearchContext) => void>();
+  const commands = new Map<string, Parameters<SearchExtension["registerCommand"]>[1]>();
+  const state: {
+    branch: SearchEntry[];
+    statuses: { key: string; value: string | undefined }[];
+    notifications: { text: string; level: "info" | "warning" | "error" | undefined }[];
+    idle: boolean;
+    active: string[];
+    tools: Map<string, RegisteredSearchTool>;
+  } = { branch: [], statuses: [], notifications: [], idle: true, active: ["read"], tools: new Map() };
+  const pi: SearchExtension = {
     on(name, handler) { handlers.set(name, handler); },
     registerCommand(name, command) { commands.set(name, command); },
     registerTool(tool) { state.tools.set(tool.name, tool); if (active) state.active.push(tool.name); },
     appendEntry(customType, data) { state.branch.push({ type: "custom", customType, data }); },
     getActiveTools: () => [...state.active],
     setActiveTools: (names) => { state.active = [...names]; },
-    getThinkingLevel: () => "medium",
   };
-  const ctx = {
-    model: { id, provider: "existing_gateway", api: "openai-responses" },
+  const ctx: SearchContext & { model: Model<Api>; thinkingLevel: string | undefined } = {
+    model: modelFixture(id),
+    modelRegistry: { streamSimple() { assert.fail("No model request was expected"); } },
     thinkingLevel: MODELS.find(([model]) => model === id)?.[1],
-    mode, isIdle: () => state.idle,
+    mode, signal: undefined, isIdle: () => state.idle,
     sessionManager: { getBranch: () => state.branch },
     ui: {
       setStatus(key, value) { state.statuses.push({ key, value }); },
       notify(text, level) { state.notifications.push({ text, level }); },
     },
   };
-  registerWebSearch(pi, { parameters: { type: "object" } });
+  registerWebSearch(pi, { parameters: PARAMETERS });
+  const tool = state.tools.get(TOOL_NAME);
+  const command = commands.get("web-search");
+  assert.ok(tool);
+  assert.ok(command);
   return {
-    ctx, state, handlers,
-    tool: state.tools.get(TOOL_NAME),
-    emit: (name, event = {}) => handlers.get(name)(event, ctx),
-    command: (args) => commands.get("web-search").handler(args, ctx),
+    ctx, state, handlers, tool,
+    emit(name: string, event: SearchStartEvent = { systemPromptOptions: { sections: {} } }) {
+      const handler = handlers.get(name);
+      assert.ok(handler);
+      return handler(event, ctx);
+    },
+    command: (args: string) => command.handler(args, ctx),
+    status() {
+      const status = state.statuses.at(-1);
+      assert.ok(status, "A footer status must have been published");
+      return status.value;
+    },
   };
 }
 
-function response(stopReason = "stop") {
-  return { role: "assistant", content: [{ type: "text", text: TEXT }], stopReason, usage: USAGE };
+function response(stopReason: AssistantMessage["stopReason"] = "stop"): AssistantMessage {
+  return {
+    role: "assistant", content: [{ type: "text", text: TEXT }], stopReason, usage: USAGE,
+    api: "openai-responses", provider: "existing_gateway", model: "model", timestamp: 0,
+  };
 }
 
-function fakeRegistry({ stopReason = "stop", search = true, citations = true, capture = () => {} } = {}) {
+function fakeRegistry({ stopReason = "stop", search = true, citations = true, capture = () => {} }: {
+  stopReason?: Extract<AssistantMessageEvent, { type: "done" }>["reason"];
+  search?: boolean;
+  citations?: boolean;
+  capture?: (value: CapturedSearch) => void;
+} = {}): SearchRegistry {
   return {
     streamSimple(model, context, options) {
       capture({ model, context, options });
-      return (async function* () {
-        options.onResponse({ status: 200 });
-        if (search) options.onProviderStreamEvent({ type: "response.output_item.done", item: {
+      return (async function* (): AsyncGenerator<AssistantMessageEvent> {
+        await options.onResponse?.({ status: 200, headers: {} }, model);
+        if (search) await options.onProviderStreamEvent?.({ type: "response.output_item.done", item: {
           type: "web_search_call", id: "search_1", status: "completed", action: { type: "search", query: "release" },
-        } });
+        } }, model);
         const item = { type: "message", id: "message_1", content: [{ type: "output_text", text: TEXT, annotations: citations ? [CITATION] : [] }] };
-        options.onProviderStreamEvent({ type: "response.output_item.done", item });
-        options.onProviderStreamEvent({ type: "response.completed", response: { output: [item] } });
-        yield { type: "text_start" };
-        yield { type: "done", message: response(stopReason) };
+        await options.onProviderStreamEvent?.({ type: "response.output_item.done", item }, model);
+        await options.onProviderStreamEvent?.({ type: "response.completed", response: { output: [item] } }, model);
+        yield { type: "text_start", contentIndex: 0, partial: response() };
+        yield { type: "done", reason: stopReason, message: response(stopReason) };
       })();
     },
   };
 }
 
-function budgetFixture(count = 100, status = 200) {
-  const calls = [];
-  const failures = [];
-  const counts = [];
+function budgetFixture(count: unknown = 100, status = 200) {
+  const calls: { url: string; headers: Headers; body: Record<string, unknown> }[] = [];
+  const failures: string[] = [];
+  const counts: number[] = [];
   const signal = new AbortController().signal;
   const fetchRequest = createBudgetedFetch({
     signal,
     fetch: async (input, init) => {
       const request = new Request(input, init);
-      calls.push({ url: request.url, headers: request.headers, body: await request.json() });
+      // This fixture receives only searchPayload objects and their count-field projection.
+      const body = await request.json() as Record<string, unknown>;
+      calls.push({ url: request.url, headers: request.headers, body });
       return request.url.endsWith("/input_tokens")
         ? new Response(JSON.stringify({ input_tokens: count }), { status })
         : new Response("generation");
@@ -97,22 +156,28 @@ for (const [id, thinkingLevel] of MODELS) {
   test(`${id}: default on, keep the main model, and use low search effort`, async () => {
     const h = harness({ id });
     h.emit("session_start");
-    assert.equal(h.state.statuses.at(-1).value, "web: on");
-    let captured;
+    assert.equal(h.status(), "web: on");
+    let captured: CapturedSearch | undefined;
     h.ctx.modelRegistry = fakeRegistry({ capture: (value) => { captured = value; } });
     const result = await h.tool.execute("call", { query: "release", context: "Relevant background" }, undefined, undefined, h.ctx);
     assert.equal(result.isError, undefined);
+    assert.ok(captured);
     assert.equal(captured.model.id, id);
     assert.equal(captured.options.reasoning, undefined);
-    assert.deepEqual(captured.options.onPayload({ reasoning: { effort: thinkingLevel } }).reasoning, { effort: "low" });
+    assert.ok(captured.options.onPayload);
+    const payload = await captured.options.onPayload({ reasoning: { effort: thinkingLevel } }, captured.model);
+    assert.ok(payload && typeof payload === "object" && "reasoning" in payload);
+    assert.deepEqual(payload.reasoning, { effort: "low" });
     assert.equal(result.details.thinkingLevel, "low");
     assert.equal(h.ctx.thinkingLevel, thinkingLevel);
     assert.equal(captured.options.maxTokens, OUTPUT_TOKEN_LIMIT);
     assert.equal(captured.options.maxRetries, 0);
     assert.equal(captured.context.messages.length, 1);
-    assert.deepEqual(JSON.parse(captured.context.messages[0].content), { query: "release", context: "Relevant background" });
+    const message = captured.context.messages[0];
+    assert.ok(message.role === "user" && typeof message.content === "string");
+    assert.deepEqual(JSON.parse(message.content), { query: "release", context: "Relevant background" });
     assert.equal(result.usage, USAGE);
-    assert.match(result.content[0].text, /\[Release notes\]/u);
+    assert.match(firstText(result), /\[Release notes\]/u);
     assert.equal(result.details.sources.length, 1);
     assert.equal(result.details.searchCount, 1);
   });
@@ -122,11 +187,11 @@ test("register a normal web_run tool without main provider hooks", () => {
   const h = harness();
   assert.equal(h.tool.name, "web_run");
   assert.equal(h.tool.label, "web.run");
-  assert.equal(h.tool.namespace.name, "web");
+  assert.equal(h.tool.namespace?.name, "web");
   assert.equal(h.handlers.has("before_provider_request"), false);
   assert.equal(h.handlers.has("provider_stream_event"), false);
   assert.equal(h.handlers.has("message_end"), false);
-  assert.equal(h.tool.annotations.readOnlyHint, true);
+  assert.equal(h.tool.annotations?.readOnlyHint, true);
 });
 
 test("prompt guidance makes main-session search conditional", () => {
@@ -145,13 +210,13 @@ test("off removes the declaration and blocks execution without a network request
   const h = harness();
   await h.command("off");
   assert.deepEqual(h.state.active, ["read"]);
-  assert.equal(h.state.statuses.at(-1).value, "web: off");
+  assert.equal(h.status(), "web: off");
   const result = await h.tool.execute("call", { query: "release" }, undefined, undefined, h.ctx);
   assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /Web search is off/u);
+  assert.match(firstText(result), /Web search is off/u);
   await h.command("on");
   assert.deepEqual(h.state.active, ["read", TOOL_NAME]);
-  assert.equal(h.state.statuses.at(-1).value, "web: on");
+  assert.equal(h.status(), "web: on");
 });
 
 test("unsupported providers, APIs, and models show unavailable and cannot be enabled", async () => {
@@ -161,11 +226,11 @@ test("unsupported providers, APIs, and models show unavailable and cannot be ena
     h.emit("model_select");
     await h.command("on");
     assert.deepEqual(h.state.active, ["read"]);
-    assert.equal(h.state.statuses.at(-1).value, "web: unavailable");
+    assert.equal(h.status(), "web: unavailable");
     assert.equal(h.state.branch.length, 0);
     const result = await h.tool.execute("call", { query: "release" }, undefined, undefined, h.ctx);
     assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /unavailable/u);
+    assert.match(firstText(result), /unavailable/u);
   }
 });
 
@@ -175,13 +240,13 @@ test("model switching restores supported search while preserving the off prefere
   h.emit("model_select");
   h.ctx.model.id = MODELS[1][0];
   h.emit("model_select");
-  assert.equal(h.state.statuses.at(-1).value, "web: on");
+  assert.equal(h.status(), "web: on");
   await h.command("off");
   h.ctx.model.id = "unsupported";
   h.emit("model_select");
   h.ctx.model.id = MODELS[2][0];
   h.emit("model_select");
-  assert.equal(h.state.statuses.at(-1).value, "web: off");
+  assert.equal(h.status(), "web: off");
 });
 
 test("explicit CLI tool exclusions remain off until the user enables search", async () => {
@@ -189,7 +254,7 @@ test("explicit CLI tool exclusions remain off until the user enables search", as
   h.emit("session_start");
   h.emit("before_agent_start", { systemPromptOptions: { sections: {} } });
   assert.deepEqual(h.state.active, ["read"]);
-  assert.equal(h.state.statuses.at(-1).value, "web: off");
+  assert.equal(h.status(), "web: off");
   h.ctx.model.id = "other";
   h.emit("model_select");
   h.ctx.model.id = MODELS[0][0];
@@ -203,12 +268,12 @@ test("session preferences restore from the active branch and status is read-only
   const h = harness();
   h.state.branch = [{ type: "custom", customType: STATE_TYPE, data: { enabled: false } }];
   h.emit("session_start");
-  assert.equal(h.state.statuses.at(-1).value, "web: off");
+  assert.equal(h.status(), "web: off");
   await h.command("status");
   assert.equal(h.state.branch.length, 1);
   h.state.branch = [];
   h.emit("session_tree");
-  assert.equal(h.state.statuses.at(-1).value, "web: on");
+  assert.equal(h.status(), "web: on");
 });
 
 test("busy and invalid commands do not change state", async () => {
@@ -221,7 +286,7 @@ test("busy and invalid commands do not change state", async () => {
 });
 
 test("non-interactive modes never publish footer statuses", async () => {
-  for (const mode of ["print", "json", "rpc"]) {
+  for (const mode of ["print", "json", "rpc"] as const) {
     const h = harness({ mode });
     h.emit("session_start");
     await h.command("off");
@@ -235,14 +300,14 @@ test("shutdown clears only this status and cancels future nested work", async ()
   h.ctx.modelRegistry = { streamSimple() { assert.fail("No request after shutdown"); } };
   h.emit("session_shutdown");
   const result = await h.tool.execute("call", { query: "release" }, undefined, undefined, h.ctx);
-  assert.equal(h.state.statuses.at(-1).value, undefined);
+  assert.equal(h.status(), undefined);
   assert.equal(result.details.status, "cancelled");
 });
 
 test("empty queries fail before accessing the model runtime", async () => {
   const h = harness();
   const result = await h.tool.execute("call", { query: "  " }, undefined, undefined, h.ctx);
-  assert.match(result.content[0].text, /non-empty/u);
+  assert.match(firstText(result), /non-empty/u);
   assert.equal(result.isError, true);
 });
 
@@ -293,46 +358,61 @@ test("missing or failed input counts fail closed", async () => {
   assert.equal(h.calls.length, 1);
 });
 
+test("malformed input-counter bodies fail before generation", async () => {
+  for (const body of [null, [], {}]) {
+    let requests = 0;
+    const fetchRequest = createBudgetedFetch({
+      fetch: async () => { requests++; return new Response(JSON.stringify(body)); },
+      signal: new AbortController().signal,
+      onCount() { assert.fail("Malformed bodies must not publish a count"); },
+      onFailure() {},
+    });
+    await assert.rejects(fetchRequest("https://example.com/responses", { method: "POST", body: "{}" }), /invalid input-token count/u);
+    assert.equal(requests, 1, "Malformed bodies must not reach generation");
+  }
+});
+
 test("input-counter network errors do not expose diagnostics or credentials", async () => {
-  let failure;
+  let failure: string | undefined;
   const fetchRequest = createBudgetedFetch({
     fetch: async () => { throw new Error("private address and sk-secret"); },
     signal: new AbortController().signal,
     onCount() {}, onFailure: (message) => { failure = message; },
   });
   await assert.rejects(fetchRequest("https://example.com/responses", { method: "POST", body: "{}" }), /could not complete/u);
+  assert.ok(failure);
   assert.doesNotMatch(failure, /private|secret/u);
 });
 
 test("search output preserves citations and suppresses raw provider thinking", async () => {
   const result = await runSearch({
-    ctx: { modelRegistry: fakeRegistry() }, model: { id: "model" }, query: "release",
+    ctx: { modelRegistry: fakeRegistry() }, model: modelFixture(), query: "release",
     signal: new AbortController().signal,
   });
   assert.equal(result.details.status, "done");
-  assert.match(result.content[0].text, /### Sources/u);
+  assert.match(firstText(result), /### Sources/u);
   assert.equal(result.details.sources.length, 1);
   assert.equal(result.usage, USAGE);
 });
 
 test("missing native search is not reported as verified evidence", async () => {
   const result = await runSearch({
-    ctx: { modelRegistry: fakeRegistry({ search: false }) }, model: { id: "model" }, query: "release",
+    ctx: { modelRegistry: fakeRegistry({ search: false }) }, model: modelFixture(), query: "release",
     signal: new AbortController().signal,
   });
   assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /no completed native search/u);
-  assert.doesNotMatch(result.content[0].text, /The release is available/u);
+  assert.match(firstText(result), /no completed native search/u);
+  assert.doesNotMatch(firstText(result), /The release is available/u);
 });
 
 test("generation limits return an explicit partial error and retain usage", async () => {
   const result = await runSearch({
-    ctx: { modelRegistry: fakeRegistry({ stopReason: "length" }) }, model: { id: "model" }, query: "release",
+    ctx: { modelRegistry: fakeRegistry({ stopReason: "length" }) }, model: modelFixture(), query: "release",
     signal: new AbortController().signal,
   });
   assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /findings are incomplete/u);
-  assert.match(result.content[0].text, /Partial findings/u);
+  assert.match(firstText(result), /findings are incomplete/u);
+  assert.match(firstText(result), /Partial findings/u);
   assert.equal(result.usage, USAGE);
 });
 
@@ -341,7 +421,7 @@ test("pre-cancelled work never starts a model request", async () => {
   controller.abort();
   const result = await runSearch({
     ctx: { modelRegistry: { streamSimple() { assert.fail("Must not start"); } } },
-    model: { id: "model" }, query: "release", signal: controller.signal,
+    model: modelFixture(), query: "release", signal: controller.signal,
   });
   assert.equal(result.isError, true);
   assert.equal(result.details.status, "cancelled");
@@ -349,17 +429,19 @@ test("pre-cancelled work never starts a model request", async () => {
 
 test("cancellation reaches an active independent request and retains incurred usage", async () => {
   const controller = new AbortController();
-  const started = Promise.withResolvers();
-  const modelRegistry = {
+  const started = Promise.withResolvers<void>();
+  const modelRegistry: SearchRegistry = {
     streamSimple(_model, _context, options) {
-      return (async function* () {
+      const signal = options.signal;
+      assert.ok(signal);
+      return (async function* (): AsyncGenerator<AssistantMessageEvent> {
         started.resolve();
-        await new Promise((resolveAbort) => options.signal.addEventListener("abort", resolveAbort, { once: true }));
-        yield { type: "error", error: response("aborted") };
+        await new Promise((resolveAbort) => signal.addEventListener("abort", resolveAbort, { once: true }));
+        yield { type: "error", reason: "aborted", error: response("aborted") };
       })();
     },
   };
-  const running = runSearch({ ctx: { modelRegistry }, model: { id: "model" }, query: "release", signal: controller.signal });
+  const running = runSearch({ ctx: { modelRegistry }, model: modelFixture(), query: "release", signal: controller.signal });
   await started.promise;
   controller.abort();
   const result = await running;
@@ -370,31 +452,33 @@ test("cancellation reaches an active independent request and retains incurred us
 
 test("the operation timeout cancels active work", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
-  const started = Promise.withResolvers();
-  const modelRegistry = {
+  const started = Promise.withResolvers<void>();
+  const modelRegistry: SearchRegistry = {
     streamSimple(_model, _context, options) {
-      return (async function* () {
+      const signal = options.signal;
+      assert.ok(signal);
+      return (async function* (): AsyncGenerator<AssistantMessageEvent> {
         started.resolve();
-        await new Promise((resolveAbort) => options.signal.addEventListener("abort", resolveAbort, { once: true }));
-        yield { type: "error", error: response("aborted") };
+        await new Promise((resolveAbort) => signal.addEventListener("abort", resolveAbort, { once: true }));
+        yield { type: "error", reason: "aborted", error: response("aborted") };
       })();
     },
   };
-  const running = runSearch({ ctx: { modelRegistry }, model: { id: "model" }, query: "release", signal: new AbortController().signal });
+  const running = runSearch({ ctx: { modelRegistry }, model: modelFixture(), query: "release", signal: new AbortController().signal });
   await started.promise;
   t.mock.timers.tick(180000);
   const result = await running;
   assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /180-second limit/u);
+  assert.match(firstText(result), /180-second limit/u);
 });
 
 test("provider errors do not expose raw private diagnostics", async () => {
   const result = await runSearch({
     ctx: { modelRegistry: { streamSimple() { throw new Error("secret credentials"); } } },
-    model: { id: "model" }, query: "release", signal: new AbortController().signal,
+    model: modelFixture(), query: "release", signal: new AbortController().signal,
   });
   assert.equal(result.isError, true);
-  assert.doesNotMatch(result.content[0].text, /secret credentials/u);
+  assert.doesNotMatch(firstText(result), /secret credentials/u);
 });
 
 test("citation links preserve claims, deduplicate annotations, and retain fallback sources", () => {

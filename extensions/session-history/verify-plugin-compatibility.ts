@@ -1,24 +1,28 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AgentSession, ExtensionUIContext, SettingsManager, TerminalInputHandler } from "@earendil-works/pi-coding-agent";
+import { testTUI, testUI, type TestWidget, type WidgetContent } from "../../scripts/test-fixtures.ts";
+import { readJson, readPackageInfo } from "../../scripts/verification-data.ts";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageArgument = process.argv[2];
-assert.ok(packageArgument, "Usage: node verify-plugin-compatibility.mjs <installed-pi-package-directory>");
+assert.ok(packageArgument, "Usage: node verify-plugin-compatibility.ts <installed-pi-package-directory>");
 const packageDirectory = resolve(packageArgument);
 const extensionDirectory = dirname(fileURLToPath(import.meta.url));
 const agentDirectory = resolve(extensionDirectory, "../..");
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "pi-session-history-plugins-"));
-const packageInfo = JSON.parse(readFileSync(join(packageDirectory, "package.json"), "utf8"));
-let session;
+const packageInfo = readPackageInfo(join(packageDirectory, "package.json"));
+let session: AgentSession | undefined;
 let passed = false;
 let phase = "loading configured extensions";
 const heartbeat = setInterval(() => {
   process.stderr.write(`[${new Date().toISOString()}] Session-history plugin compatibility: ${phase}\n`);
 }, 20_000);
 
-function assistant(text) {
+function assistant(text: string): AssistantMessage {
   return {
     role: "assistant",
     content: [{ type: "text", text }],
@@ -39,18 +43,18 @@ function assistant(text) {
 }
 
 try {
-  const sdk = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
-  const tui = await import(pathToFileURL(join(
+  const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
+  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(join(
     packageDirectory,
     "node_modules/@earendil-works/pi-tui/dist/index.js",
   )).href);
-  const themeApi = await import(pathToFileURL(join(
+  const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(
     packageDirectory,
     "dist/modes/interactive/theme/theme.js",
   )).href);
   themeApi.initTheme("dark", false);
 
-  const globalSettings = JSON.parse(readFileSync(join(agentDirectory, "settings.json"), "utf8"));
+  const globalSettings = readJson<ReturnType<SettingsManager["getGlobalSettings"]>>(join(agentDirectory, "settings.json"));
   const settings = sdk.SettingsManager.inMemory({
     ...globalSettings,
     extensions: [...(globalSettings.extensions ?? []), "-builtin:mcp"],
@@ -114,7 +118,9 @@ try {
     }));
     manager.appendMessage(assistant(`Compatibility response ${index}`));
   }
-  manager.appendCompaction("Compatibility summary", userIds.at(-3), 40_000);
+  const firstKeptEntryId = userIds.at(-3);
+  assert.ok(firstKeptEntryId);
+  manager.appendCompaction("Compatibility summary", firstKeptEntryId, 40_000);
   manager.appendMessage({
     role: "user",
     content: "Current compatibility message",
@@ -141,31 +147,19 @@ try {
   document.addChild(header);
   document.addChild(resources);
   document.addChild(chat);
-  let renderedLines = [];
-  const fakeTui = {
-    mode: "fullscreen",
-    children: [document],
-    terminal: { columns: 140, rows: 45, setTitle() {} },
-    viewportTop: 10_000,
-    isFollowingOutput: true,
-    hasOverlay: () => false,
-    requestRender() {},
-    renderNow() { renderedLines = document.render(this.terminal.columns); },
-    scrollBy(lines) { this.viewportTop = Math.max(0, this.viewportTop + lines); this.isFollowingOutput = false; },
-    scrollToTop() { this.viewportTop = 0; this.isFollowingOutput = false; },
-    scrollToBottom() { this.viewportTop = Math.max(0, renderedLines.length - this.terminal.rows); this.isFollowingOutput = true; },
-  };
+  let renderedLines: string[] = [];
+  const fakeTui = testTUI(document, (lines) => { renderedLines = lines; });
 
-  const inputListeners = new Set();
-  const widgets = new Map();
-  const statuses = new Map();
-  const notifications = [];
-  const errors = [];
+  const inputListeners = new Set<TerminalInputHandler>();
+  const widgets = new Map<string, TestWidget>();
+  const statuses = new Map<string, string>();
+  const notifications: { message: string; type: string | undefined }[] = [];
+  const errors: unknown[] = [];
   let editorText = "";
-  let footerFactory;
-  let headerFactory;
-  let editorFactory;
-  const uiContext = {
+  let footerFactory: Parameters<ExtensionUIContext["setFooter"]>[0];
+  let headerFactory: Parameters<ExtensionUIContext["setHeader"]>[0];
+  let editorFactory: Parameters<ExtensionUIContext["setEditorComponent"]>[0];
+  const uiContext = testUI(session, {
     select: async () => undefined,
     confirm: async () => false,
     input: async () => undefined,
@@ -182,7 +176,7 @@ try {
     setWorkingVisible() {},
     setWorkingIndicator() {},
     setHiddenThinkingLabel() {},
-    setWidget(key, content) {
+    setWidget(key: string, content: WidgetContent) {
       widgets.get(key)?.dispose?.();
       widgets.delete(key);
       if (content === undefined) return;
@@ -195,7 +189,7 @@ try {
     setFooter(factory) { footerFactory = factory; },
     setHeader(factory) { headerFactory = factory; },
     setTitle() {},
-    custom: async () => undefined,
+    custom: async () => { throw new Error("Custom UI is outside this fixture."); },
     pasteToEditor() {},
     setEditorText(value) { editorText = value; },
     getEditorText() { return editorText; },
@@ -209,7 +203,7 @@ try {
     setTheme: () => ({ success: true }),
     getToolsExpanded: () => false,
     setToolsExpanded() {},
-  };
+  });
 
   phase = "binding all extensions in TUI mode";
   await session.bindExtensions({
@@ -226,7 +220,9 @@ try {
   assert.equal(document.children.at(-1), chat);
   assert.ok(widgets.has("session-history-mount"));
   assert.ok([...widgets.keys()].some((key) => key.startsWith("powerline-")));
-  const commandNames = session.extensionRunner
+  const runner = session.extensionRunner;
+  assert.ok(runner);
+  const commandNames = runner
     .getRegisteredCommands()
     .map((command) => command.name);
   assert.ok(commandNames.includes("todos"));
@@ -252,7 +248,7 @@ try {
   assert.equal(headerFactory, undefined, "Powerline welcome is disabled and history must not replace the header");
 
   phase = "checking full cleanup";
-  await session.extensionRunner.emit({ type: "session_shutdown", reason: "reload" });
+  await runner.emit({ type: "session_shutdown", reason: "reload" });
   assert.ok(inputListeners.size < inputListenerCountBeforeShutdown);
   assert.equal(widgets.has("session-history-mount"), false);
   assert.equal(document.children.length, 3);
@@ -269,7 +265,7 @@ try {
   clearInterval(heartbeat);
   try {
     if (session) {
-      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
       session.dispose();
     }
   } finally {

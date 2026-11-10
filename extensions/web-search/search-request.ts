@@ -1,28 +1,8 @@
-import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { CitationAnnotation, SearchDetails, SearchResult, Source } from "./types.ts";
+import type { ResponseFunctionWebSearch as SearchItem, ResponseOutputItem as OutputItem, ResponseStreamEvent as ProviderEvent } from "openai/resources/responses/responses";
+import type { SearchDetails, SearchResult, Source } from "./types.ts";
 import { citationSource, cleanText, renderCitations, sourceLink } from "./citations.ts";
-
-interface SearchItem {
-  type: "web_search_call";
-  id: string;
-  status: string;
-  action?: { type: string; query?: string; queries?: string[] };
-}
-
-interface MessageItem {
-  type: "message";
-  id: string;
-  content?: ({ type: "output_text"; text: string; annotations?: CitationAnnotation[] } | { type: "refusal"; refusal: string })[];
-}
-
-type OutputItem = SearchItem | MessageItem | { type: "reasoning" | "function_call" };
-interface ProviderEvent {
-  type: string;
-  item?: OutputItem;
-  response?: { output?: OutputItem[] };
-}
 
 interface BudgetedFetchOptions {
   fetch: typeof globalThis.fetch;
@@ -31,9 +11,13 @@ interface BudgetedFetchOptions {
   onFailure(message: string): void;
 }
 
+export interface SearchRegistry {
+  streamSimple(model: Model<Api>, context: Context, options: ModelsSimpleStreamOptions): AsyncIterable<AssistantMessageEvent>;
+}
+
 interface SearchOptions {
-  ctx: Pick<ExtensionContext, "modelRegistry">;
-  model: Model<any>;
+  ctx: { modelRegistry: SearchRegistry };
+  model: Model<Api>;
   query: string;
   context?: string;
   signal: AbortSignal;
@@ -85,7 +69,8 @@ export function searchPayload(payload: unknown): Record<string, unknown> {
 export function createBudgetedFetch({ fetch: fetchRequest, signal, onCount, onFailure }: BudgetedFetchOptions): typeof globalThis.fetch {
   return async (input, init) => {
     const request = new Request(input, init);
-    const payload = await request.clone().json();
+    // The provider serializes the object returned by searchPayload as the request body.
+    const payload = await request.clone().json() as Record<string, unknown>;
     const countPayload = Object.fromEntries(COUNT_FIELDS
       .filter((key) => payload[key] !== undefined)
       .map((key) => [key, payload[key]]));
@@ -105,8 +90,9 @@ export function createBudgetedFetch({ fetch: fetchRequest, signal, onCount, onFa
       if (!response.ok) {
         throw new Error(`Input-token check failed (HTTP ${response.status}). No search request was sent.`);
       }
-      const body = await response.json();
-      if (!Number.isSafeInteger(body.input_tokens) || body.input_tokens < 0) {
+      const body: unknown = await response.json();
+      if (!body || typeof body !== "object" || !("input_tokens" in body)
+        || typeof body.input_tokens !== "number" || !Number.isSafeInteger(body.input_tokens) || body.input_tokens < 0) {
         throw new Error("The gateway returned an invalid input-token count. No search request was sent.");
       }
       count = body.input_tokens;
@@ -219,6 +205,7 @@ export async function runSearch({ ctx, model, query, context, signal, onUpdate, 
         onFailure: (message) => { failure = message; },
       }),
       onProviderStreamEvent: (data) => {
+        // Pi leaves provider data opaque; supported models use the OpenAI Responses contract.
         const event = data as ProviderEvent;
         if (event.type === "response.created") {
           searches.clear();

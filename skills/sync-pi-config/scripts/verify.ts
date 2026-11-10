@@ -1,28 +1,38 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { AgentToolResult, ExtensionError, JsonAgentSessionEvent, SessionHeader, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { parseTrustedJson, readJson } from '../../../scripts/verification-data.ts';
 
-function log(message) {
+export type VerificationSettings = Pick<ReturnType<SettingsManager['getGlobalSettings']>,
+  'extensions' | 'defaultProvider' | 'defaultModel' | 'defaultThinkingLevel' | 'modelThinkingLevels'>;
+type ToolCompletion = Extract<JsonAgentSessionEvent, { type: 'tool_execution_end' }>;
+// Upstream leaves tool results untyped; Pi tools use AgentToolResult.
+export type VerificationEvent = SessionHeader
+  | Exclude<JsonAgentSessionEvent, ToolCompletion>
+  | (Omit<ToolCompletion, 'result'> & { result: AgentToolResult<unknown> })
+  | ({ type: 'extension_error' } & ExtensionError);
+
+interface PackageInfo {
+  name: string;
+  version: string;
+  main: string;
+  bin: { pi: string };
+}
+
+function log(message: string) {
   process.stderr.write(`[${new Date().toISOString()}] ${message}\n`);
 }
 
-function readJson(path) {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    // Parser errors can quote private configuration values.
-    throw new Error(`Cannot read valid JSON: ${path}`);
-  }
-}
-
-export async function validateConfig(agentDir, packageDir) {
+export async function validateConfig(agentDir: string, packageDir: string): Promise<VerificationSettings> {
   const require = createRequire(pathToFileURL(join(packageDir, 'package.json')));
   const validatorUrl = pathToFileURL(require.resolve('typebox/value'));
-  const { Check } = await import(validatorUrl.href);
+  const { Check }: { Check(schema: unknown, value: unknown): boolean } = await import(validatorUrl.href);
+  let settings: VerificationSettings = {};
 
   for (const name of ['settings', 'models', 'keybindings']) {
     const configPath = join(agentDir, `${name}.json`);
@@ -38,14 +48,17 @@ export async function validateConfig(agentDir, packageDir) {
       throw new Error(`${name}.json does not match the installed Pi schema`);
     }
 
+    if (name === 'settings') {
+      // The installed schema validates these settings before they enter the verifier's narrower contract.
+      settings = config as VerificationSettings;
+    }
     log(`PASS: ${name}.json matches installed schema`);
   }
 
-  const settingsPath = join(agentDir, 'settings.json');
-  return existsSync(settingsPath) ? readJson(settingsPath) : {};
+  return settings;
 }
 
-export function assertMcpDisabled(settings) {
+export function assertMcpDisabled(settings: VerificationSettings) {
   const extensions = settings.extensions ?? [];
   const hasDisableEntry = extensions.includes('-builtin:mcp');
   const hasEnableEntry = extensions.some(
@@ -60,10 +73,10 @@ export function assertMcpDisabled(settings) {
   }
 }
 
-export function assertHealthy(events, settings, marker) {
-  const assistant = events.findLast(
-    (event) => event.type === 'message_end' && event.message?.role === 'assistant',
-  )?.message;
+export function assertHealthy(events: VerificationEvent[], settings: VerificationSettings, marker: string) {
+  const assistant = events.filter((event) => event.type === 'message_end')
+    .map((event) => event.message)
+    .findLast((message) => message.role === 'assistant');
   const settled = events.findLast((event) => event.type === 'agent_settled');
   const hasSessionHeader = events.some((event) => event.type === 'session' && event.id);
   const readSucceeded = events.some(
@@ -71,7 +84,7 @@ export function assertHealthy(events, settings, marker) {
       event.type === 'tool_execution_end' &&
       event.toolName === 'read' &&
       !event.isError &&
-      event.result?.content?.some((block) => block.type === 'text' && block.text.includes(marker)),
+      event.result?.content?.some((block) => block.type === 'text' && block.text?.includes(marker)),
   );
   const failed = events.some((event) => {
     if (event.type === 'extension_error') {
@@ -87,7 +100,7 @@ export function assertHealthy(events, settings, marker) {
     return (
       event.type === 'message_end' &&
       event.message?.role === 'assistant' &&
-      ['error', 'aborted', 'length', 'deferred'].includes(event.message.stopReason)
+      ['error', 'aborted', 'length', 'deferred'].includes(event.message.stopReason ?? '')
     );
   });
   const text = assistant?.content
@@ -128,7 +141,7 @@ export function assertHealthy(events, settings, marker) {
   return modelKey;
 }
 
-async function runSession(packageDir, packageInfo, agentDir, cwd, onRecord) {
+async function runSession(packageDir: string, packageInfo: PackageInfo, agentDir: string, cwd: string, onRecord: () => void): Promise<VerificationEvent[]> {
   const prompt = [
     'This is a read-only configuration smoke test.',
     'Use the read tool to read healthcheck.txt in the current directory.',
@@ -159,7 +172,7 @@ async function runSession(packageDir, packageInfo, agentDir, cwd, onRecord) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  const events = [];
+  const events: VerificationEvent[] = [];
   let pending = '';
   let invalidJson = false;
   let stderrBytes = 0;
@@ -177,7 +190,8 @@ async function runSession(packageDir, packageInfo, agentDir, cwd, onRecord) {
       pending = pending.slice(newlineIndex + 1);
 
       try {
-        const event = JSON.parse(line);
+        // This child runs the installed Pi; reuse its JSON wire types without a parallel schema.
+        const event = parseTrustedJson<VerificationEvent>(line);
         onRecord();
         if (event.type !== 'message_update') {
           events.push(event);
@@ -199,7 +213,7 @@ async function runSession(packageDir, packageInfo, agentDir, cwd, onRecord) {
   }, 90_000);
 
   try {
-    const code = await new Promise((resolveExit, reject) => {
+    const code = await new Promise<number | null>((resolveExit, reject) => {
       child.once('error', reject);
       child.once('close', resolveExit);
     });
@@ -231,11 +245,12 @@ async function runSession(packageDir, packageInfo, agentDir, cwd, onRecord) {
 
 async function main() {
   if (process.argv.length !== 3) {
-    throw new Error('Usage: node verify.mjs <installed-pi-package-directory>');
+    throw new Error('Usage: node verify.ts <installed-pi-package-directory>');
   }
 
   const packageDir = resolve(process.argv[2]);
-  const packageInfo = readJson(join(packageDir, 'package.json'));
+  const packageInfo = readJson<PackageInfo>(join(packageDir, 'package.json'));
+  if (packageInfo.name !== '@earendil-works/pi-coding-agent') throw new Error('Expected the installed Pi package');
   const agentDir = fileURLToPath(new URL('../../../', import.meta.url));
   let phase = 'schema and skill checks';
   let receivedRecords = 0;
@@ -252,7 +267,7 @@ async function main() {
     log('PASS: global settings explicitly disable built-in MCP');
 
     const sdkUrl = pathToFileURL(resolve(packageDir, packageInfo.main));
-    const { loadSkillsFromDir } = await import(sdkUrl.href);
+    const { loadSkillsFromDir }: typeof import('@earendil-works/pi-coding-agent') = await import(sdkUrl.href);
     const { skills, diagnostics } = loadSkillsFromDir({
       dir: join(agentDir, 'skills'),
       source: 'user',
@@ -305,7 +320,7 @@ if (isCommandLineRun) {
       log('SUCCESS: configuration verification passed');
     },
     (error) => {
-      log(`FAILURE: ${error.message}`);
+      log(`FAILURE: ${error instanceof Error ? error.message : 'Configuration verification failed.'}`);
       process.exitCode = 1;
     },
   );

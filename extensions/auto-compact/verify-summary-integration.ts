@@ -1,35 +1,46 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type ServerResponse } from "node:http";
+import type { Model } from "@earendil-works/pi-ai";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { testUI } from "../../scripts/test-fixtures.ts";
+import { parseTrustedJson, readPackageInfo } from "../../scripts/verification-data.ts";
+
+interface SummaryPayload {
+  model: string;
+  input: unknown;
+  max_output_tokens: number;
+  reasoning?: { effort?: string };
+}
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { QUIT_COMMAND } from "./controller.mjs";
+import { QUIT_COMMAND } from "./controller.ts";
 
 const packagePath = resolve(process.argv[2] ?? "");
-const packageInfo = JSON.parse(readFileSync(join(packagePath, "package.json"), "utf8"));
+const packageInfo = readPackageInfo(join(packagePath, "package.json"));
 assert.equal(packageInfo.name, "@earendil-works/pi-coding-agent");
 const root = mkdtempSync(join(tmpdir(), "pi-auto-compact-summary-"));
 const agentDirectory = join(root, "agent");
 mkdirSync(agentDirectory);
-let session;
+let session: AgentSession | undefined;
 let phase = "loading installed Pi";
 let succeeded = false;
 let shutdowns = 0;
 let summaryCalls = 0;
 let failSummaries = true;
-const requests = [];
-const failures = [];
-const notifications = [];
+const requests: { summary: boolean; model: string; effort: string | undefined; limit: number }[] = [];
+const failures: string[] = [];
+const notifications: { text: string; kind: string | undefined }[] = [];
 const heartbeat = setInterval(() => {
   process.stderr.write(`[${new Date().toISOString()}] Native summary check: ${phase}\n`);
 }, 20_000);
 
-function log(text) {
+function log(text: string) {
   process.stderr.write(`[${new Date().toISOString()}] ${text}\n`);
 }
 
-async function waitFor(predicate, label) {
+async function waitFor(predicate: () => unknown, label: string) {
   const deadline = Date.now() + 10_000;
   while (!predicate()) {
     assert.ok(Date.now() < deadline, `Timed out waiting for ${label}`);
@@ -37,11 +48,11 @@ async function waitFor(predicate, label) {
   }
 }
 
-function event(response, type, fields) {
+function event(response: ServerResponse, type: string, fields: Record<string, unknown>) {
   response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...fields })}\n\n`);
 }
 
-function answer(response, request, index, length) {
+function answer(response: ServerResponse, request: SummaryPayload, index: number, length: boolean) {
   const text = length ? "Incomplete fixture summary." : "## Goal\nContinue the verified fixture.\n## Critical Context\nComplete native handoff.";
   const item = { type: "message", id: `msg_${index}`, role: "assistant", status: "completed", content: [{ type: "output_text", text, annotations: [] }] };
   const result = {
@@ -63,11 +74,12 @@ function answer(response, request, index, length) {
 
 const server = createServer(async (request, response) => {
   try {
-    const chunks = [];
+    const chunks: Buffer[] = [];
     for await (const chunk of request) {
       chunks.push(chunk);
     }
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    // Only the installed Responses adapter sends requests to this loopback fixture.
+    const body = parseTrustedJson<SummaryPayload>(Buffer.concat(chunks).toString("utf8"));
     const summary = JSON.stringify(body.input).includes("context summarization assistant");
     requests.push({ summary, model: body.model, effort: body.reasoning?.effort, limit: body.max_output_tokens });
     if (summary) {
@@ -75,17 +87,19 @@ const server = createServer(async (request, response) => {
     }
     answer(response, body, requests.length, summary && failSummaries);
   } catch (error) {
-    failures.push(error.message);
+    failures.push(error instanceof Error ? error.message : "Loopback fixture failed.");
     response.writeHead(500).end();
   }
 });
 
 try {
-  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
-  const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
-  const sdk = await import(pathToFileURL(join(packagePath, "dist", "index.js")).href);
+  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}/v1`;
+  const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packagePath, "dist", "index.js")).href);
   const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = sdk;
-  const fixture = {
+  const fixture: Model<"openai-responses"> = {
     id: "auto-compact-summary-fixture", name: "Summary fixture", provider: "fixture",
     api: "openai-responses", baseUrl, reasoning: true, input: ["text"],
     thinkingLevelMap: { off: "none", minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" },
@@ -124,15 +138,16 @@ try {
     cwd: root, agentDir: agentDirectory, modelRuntime, model: fixture, thinkingLevel: "max",
     settingsManager: settings, resourceLoader: loader, sessionManager: manager, tools: [],
   }));
-  const extensionErrors = [];
+  const extensionErrors: unknown[] = [];
   await session.bindExtensions({
     mode: "tui",
-    uiContext: { notify(text, kind) { notifications.push({ text, kind }); }, onTerminalInput() { return () => {}; }, getEditorText() { return ""; }, setEditorText() {} },
+    uiContext: testUI(session, { notify(text, kind) { notifications.push({ text, kind }); }, onTerminalInput() { return () => {}; }, getEditorText() { return ""; }, setEditorText() {} }),
     shutdownHandler() { shutdowns += 1; },
     onError: (error) => extensionErrors.push(error),
   });
   phase = "checking incomplete summaries at the model output limit";
-  await assert.rejects(() => session.compact(), /generation hit the token cap/);
+  const activeSession = session;
+  await assert.rejects(() => activeSession.compact(), /generation hit the token cap/);
   assert.equal(manager.getBranch().filter((entry) => entry.type === "compaction").length, 0);
   assert.equal(requests[0].effort, "xhigh");
   assert.equal(requests[0].limit, fixture.maxTokens, "Native summaries must use the model output limit");
@@ -159,15 +174,21 @@ try {
   assert.equal(manager.getBranch().filter((entry) => entry.type === "thinking_level_change").length, thinkingEntries);
   assert.equal(JSON.stringify(settings.getCompactionSettings(fixture)), originalSettings);
   assert.equal(manager.getBranch().filter((entry) => entry.type === "compaction").length, 1);
-  const restored = SessionManager.open(manager.getSessionFile());
+  const sessionFile = manager.getSessionFile();
+  assert.ok(sessionFile);
+  const restored = SessionManager.open(sessionFile);
   assert.equal(restored.getBranch().filter((entry) => entry.type === "compaction").length, 1);
-  assert.equal(restored.getBranch().find((entry) => entry.type === "compaction").fromHook, false);
+  const restoredCompaction = restored.getBranch().find((entry) => entry.type === "compaction");
+  assert.ok(restoredCompaction);
+  assert.equal(restoredCompaction.fromHook, false);
   assert.equal(notifications.some(({ text }) => text === "Auto-compaction completed with pi-vcc."), false);
   assert.equal(session.thinkingLevel, "max");
   phase = "checking normal requests remain max reasoning";
   await session.prompt("Make one ordinary fixture response.");
-  assert.equal(requests.at(-1).summary, false);
-  assert.equal(requests.at(-1).effort, "xhigh");
+  const lastRequest = requests.at(-1);
+  assert.ok(lastRequest);
+  assert.equal(lastRequest.summary, false);
+  assert.equal(lastRequest.effort, "xhigh");
   assert.equal(session.thinkingLevel, "max");
   succeeded = true;
   log(`PASS: installed Pi ${packageInfo.version}; manual/owned summaries preserve model, max reasoning and the model output limit; failure keeps Pi open with no partial checkpoint; explicit retry persists a complete handoff; ${summaryCalls} local summary requests`);
@@ -178,12 +199,12 @@ try {
   clearInterval(heartbeat);
   try {
     if (session) {
-      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
       session.dispose();
     }
   } finally {
     server.closeAllConnections();
-    await new Promise((resolveClose) => server.close(resolveClose));
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
     rmSync(root, { recursive: true, force: true });
     log(`Temporary integration state removed; ${succeeded ? "SUCCESS" : "FAILED"}`);
   }

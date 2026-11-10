@@ -38,7 +38,7 @@ Use this command to upgrade global third-party npm extensions:
 ## Verification limits
 
 - **Automatic checks**
-  - The skill reuses the [existing configuration verifier](../sync-pi-config/scripts/verify.mjs).
+  - The skill reuses the [existing configuration verifier](../sync-pi-config/scripts/verify.ts).
   - Its checks cover schemas, resource loading, and basic agent operation with MCP disabled.
   - The skill uses package-specific automatic checks when they need no extra tooling.
 - **Unverified features**

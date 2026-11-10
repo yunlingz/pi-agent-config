@@ -46,8 +46,8 @@ description: >
      - Use an explicit outer timeout of at least 120 seconds for the verifier.
 
      ```text
-     node --test <this-skill-directory>/scripts/verify.test.mjs
-     node <this-skill-directory>/scripts/verify.mjs <installed-pi-package-directory>
+     node --test <this-skill-directory>/scripts/verify.test.ts
+     node <this-skill-directory>/scripts/verify.ts <installed-pi-package-directory>
      ```
 
    - **Verifier coverage**

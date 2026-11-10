@@ -59,8 +59,8 @@ disable-model-invocation: true
      - Run the existing checks before changing packages.
 
      ```text
-     node --test <agent-dir>/skills/sync-pi-config/scripts/verify.test.mjs
-     node <agent-dir>/skills/sync-pi-config/scripts/verify.mjs <installed-pi-dir>
+     node --test <agent-dir>/skills/sync-pi-config/scripts/verify.test.ts
+     node <agent-dir>/skills/sync-pi-config/scripts/verify.ts <installed-pi-dir>
      ```
 
      - Use a 30-second outer timeout for tests.

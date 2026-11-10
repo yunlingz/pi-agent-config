@@ -1,11 +1,10 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
-  SessionManager,
+  SessionEntry,
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
-  Container,
   getKeybindings,
   type Component,
   type TUI,
@@ -14,7 +13,7 @@ import {
   DEFAULT_PRELOAD_SCREENS,
   HistoryWindow,
   collectHiddenEntries,
-} from "./history-window.mjs";
+} from "./history-window.ts";
 import { HistoryTranscript } from "./history-transcript.ts";
 
 const WIDGET_KEY = "session-history-mount";
@@ -43,7 +42,13 @@ interface FullscreenTui extends TUI {
   scrollToBottom(): void;
 }
 
+// Installed Pi uses the fullscreen tag for its scrolling TUI implementation.
+function isFullscreenTui(tui: TUI): tui is FullscreenTui {
+  return tui.mode === "fullscreen";
+}
+
 function runtimeState(): RuntimeState {
+  // The symbol shares this extension's typed state across Pi reloads.
   const scope = globalThis as typeof globalThis & {
     [RUNTIME_STATE_KEY]?: RuntimeState;
   };
@@ -66,11 +71,15 @@ function rememberState(sessionId: string, state: SavedViewState): void {
 }
 
 function isDocumentContainer(component: Component | undefined): component is DocumentContainer {
-  return !!component && Array.isArray((component as Partial<DocumentContainer>).children);
+  return !!component && "children" in component && Array.isArray(component.children);
 }
 
 class EmptyMount implements Component {
-  constructor(private readonly disposeMount: () => void) {}
+  private readonly disposeMount: () => void;
+
+  constructor(disposeMount: () => void) {
+    this.disposeMount = disposeMount;
+  }
 
   render(): string[] {
     return [];
@@ -84,7 +93,7 @@ class EmptyMount implements Component {
 }
 
 class SessionHistoryController {
-  private readonly historyWindow = new HistoryWindow();
+  private readonly historyWindow = new HistoryWindow<SessionEntry>();
   private transcript?: HistoryTranscript;
   private document?: DocumentContainer;
   private tui?: TUI;
@@ -93,10 +102,13 @@ class SessionHistoryController {
   private disposed = false;
   private warnedUnsupportedLayout = false;
 
-  constructor(
-    private readonly ctx: ExtensionContext,
-    private readonly sessionManager: SessionManager,
-  ) {}
+  private readonly ctx: ExtensionContext;
+  private readonly sessionManager: ExtensionContext["sessionManager"];
+
+  constructor(ctx: ExtensionContext, sessionManager: ExtensionContext["sessionManager"]) {
+    this.ctx = ctx;
+    this.sessionManager = sessionManager;
+  }
 
   mount(tui: TUI, theme: Theme): void {
     this.unmount();
@@ -167,11 +179,8 @@ class SessionHistoryController {
     const snapshot = this.historyWindow.snapshot();
     rememberState(this.sessionManager.getSessionId(), {
       earliestEntryId: snapshot.earliestEntryId,
-      viewportTop: this.tui.mode === "fullscreen"
-        ? (this.tui as FullscreenTui).viewportTop
-        : 0,
-      followingOutput: this.tui.mode !== "fullscreen"
-        || (this.tui as FullscreenTui).isFollowingOutput,
+      viewportTop: isFullscreenTui(this.tui) ? this.tui.viewportTop : 0,
+      followingOutput: !isFullscreenTui(this.tui) || this.tui.isFollowingOutput,
     });
   }
 
@@ -200,9 +209,7 @@ class SessionHistoryController {
     const width = this.tui.terminal.columns;
     const oldHeight = this.transcript.render(width).length;
     const prefixHeight = this.prefixHeight(width);
-    const fullscreen = this.tui.mode === "fullscreen"
-      ? this.tui as FullscreenTui
-      : undefined;
+    const fullscreen = isFullscreenTui(this.tui) ? this.tui : undefined;
     const oldTop = fullscreen?.viewportTop ?? 0;
     const wasFollowing = fullscreen?.isFollowingOutput ?? true;
     const earliestEntryId = this.historyWindow.snapshot().earliestEntryId;
@@ -231,14 +238,14 @@ class SessionHistoryController {
   private loadNearTop(): void {
     if (
       !this.tui
-      || this.tui.mode !== "fullscreen"
+      || !isFullscreenTui(this.tui)
       || !this.transcript
       || !this.historyWindow.hasMore
     ) {
       return;
     }
 
-    const fullscreen = this.tui as FullscreenTui;
+    const fullscreen = this.tui;
     if (fullscreen.isFollowingOutput) {
       return;
     }
@@ -253,17 +260,17 @@ class SessionHistoryController {
   }
 
   private loadAllAndJumpToStart(): void {
-    if (!this.tui || this.tui.mode !== "fullscreen" || !this.historyWindow.hasMore) {
+    if (!this.tui || !isFullscreenTui(this.tui) || !this.historyWindow.hasMore) {
       return;
     }
 
     this.expandWindow(() => this.historyWindow.loadAll(), false);
-    (this.tui as FullscreenTui).scrollToTop();
+    this.tui.scrollToTop();
     this.tui.requestRender();
   }
 
   private expandWindow(
-    update: () => ReturnType<HistoryWindow["snapshot"]>,
+    update: () => ReturnType<HistoryWindow<SessionEntry>["snapshot"]>,
     preserveAnchor: boolean,
   ): void {
     if (!this.tui || !this.transcript) {
@@ -276,8 +283,8 @@ class SessionHistoryController {
     const newHeight = this.transcript.render(width).length;
     this.tui.renderNow();
 
-    if (preserveAnchor && this.tui.mode === "fullscreen") {
-      (this.tui as FullscreenTui).scrollBy(newHeight - oldHeight);
+    if (preserveAnchor && isFullscreenTui(this.tui)) {
+      this.tui.scrollBy(newHeight - oldHeight);
     }
     this.tui.requestRender();
   }
@@ -304,11 +311,11 @@ class SessionHistoryController {
 
     this.restoreTimer = setTimeout(() => {
       this.restoreTimer = undefined;
-      if (this.disposed || !this.tui || this.tui.mode !== "fullscreen") {
+      if (this.disposed || !this.tui || !isFullscreenTui(this.tui)) {
         return;
       }
 
-      const fullscreen = this.tui as FullscreenTui;
+      const fullscreen = this.tui;
       this.tui.renderNow();
       if (state.followingOutput) {
         fullscreen.scrollToBottom();

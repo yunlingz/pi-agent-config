@@ -6,29 +6,36 @@ import {
   QUIT_COMMAND,
   inspectHistory,
   routeQuitSubmission,
-} from "./controller.mjs";
+  type CompactRequest,
+  type CompactResult,
+  type ControllerContext,
+  type HistoryEntry,
+  type HistoryMessage,
+} from "./controller.ts";
 
 class FakeClock {
   time = 0;
-  timers = new Map();
+  timers = new Map<NodeJS.Timeout, { callback: () => void; due: number }>();
 
   now = () => this.time;
 
-  setTimer = (callback, delay) => {
-    const handle = { unref() {} };
+  setTimer = (callback: () => void, delay: number): NodeJS.Timeout => {
+    // Use a real handle without scheduling a real callback.
+    const handle = setTimeout(callback, delay);
+    clearTimeout(handle);
     this.timers.set(handle, { callback, due: this.time + delay });
     return handle;
   };
 
-  clearTimer = (handle) => {
+  clearTimer = (handle: NodeJS.Timeout) => {
     this.timers.delete(handle);
   };
 
-  advance(duration) {
+  advance(duration: number) {
     const target = this.time + duration;
     let iterations = 0;
     while (true) {
-      let next;
+      let next: { handle: NodeJS.Timeout; timer: { callback: () => void; due: number } } | undefined;
       for (const [handle, timer] of this.timers) {
         if (timer.due <= target && (!next || timer.due < next.timer.due)) {
           next = { handle, timer };
@@ -46,15 +53,26 @@ class FakeClock {
   }
 }
 
-function message(id, role, fields = {}) {
+function message(id: string, role: string, fields: Partial<HistoryMessage> = {}): HistoryEntry {
   return { type: "message", id, message: { role, timestamp: 0, ...fields } };
+}
+
+interface HarnessState {
+  history: HistoryEntry[];
+  piVccAvailable: boolean;
+  idle: boolean;
+  pending: boolean;
+  calls: CompactRequest[];
+  notifications: { text: string; kind: string | undefined }[];
+  shutdowns: number;
+  editor: string;
 }
 
 function harness({
   mode = "tui",
   history = [message("u1", "user"), message("a1", "assistant")],
   piVccAvailable = false,
-} = {}) {
+}: { mode?: ControllerContext["mode"]; history?: HistoryEntry[]; piVccAvailable?: boolean } = {}) {
   const clock = new FakeClock();
   const controller = new AutoCompactController({
     now: clock.now,
@@ -62,7 +80,7 @@ function harness({
     clearTimer: clock.clearTimer,
     hasPiVcc: () => state.piVccAvailable,
   });
-  const state = {
+  const state: HarnessState = {
     history,
     piVccAvailable,
     idle: true,
@@ -72,7 +90,7 @@ function harness({
     shutdowns: 0,
     editor: "",
   };
-  const ctx = {
+  const ctx: ControllerContext = {
     mode,
     isIdle: () => state.idle,
     hasPendingMessages: () => state.pending,
@@ -97,19 +115,25 @@ function harness({
   };
   controller.start(ctx);
 
-  function complete({ newMessages = [], remainsBusy = false, details } = {}) {
+  function complete({ newMessages = [], remainsBusy = false, details }: {
+    newMessages?: HistoryEntry[]; remainsBusy?: boolean; details?: CompactResult["details"];
+  } = {}) {
     state.history.push({ type: "compaction", id: `c${state.calls.length}` });
     state.history.push(...newMessages);
     state.idle = !remainsBusy;
     controller.workFinished();
-    state.calls.at(-1).onComplete({ summary: "Test summary", details });
+    const call = state.calls.at(-1);
+    assert.ok(call, "A compaction request must precede completion");
+    call.onComplete({ summary: "Test summary", details });
     clock.advance(0);
   }
 
-  function fail(messageText) {
+  function fail(messageText: string) {
     state.idle = true;
     controller.workFinished();
-    state.calls.at(-1).onError(new Error(messageText));
+    const call = state.calls.at(-1);
+    assert.ok(call, "A compaction request must precede failure");
+    call.onError(new Error(messageText));
     clock.advance(0);
   }
 
@@ -127,7 +151,7 @@ test("constructing the controller starts no resources", () => {
 });
 
 test("non-interactive modes never start idle timers or compact on shutdown", () => {
-  for (const mode of ["json", "print", "rpc"]) {
+  for (const mode of ["json", "print", "rpc"] as const) {
     const h = harness({ mode });
     h.clock.advance(24 * 60 * 60 * 1000);
     h.controller.stop();
@@ -181,6 +205,15 @@ test("available pi-vcc is not reported when another compactor supplies the resul
   h.clock.advance(IDLE_MS);
   h.complete({ details: { compactor: "another-compactor" } });
   assert.equal(h.state.notifications.some(({ text }) => text.includes("completed with pi-vcc")), false);
+});
+
+test("unrecognized completion details do not report pi-vcc", () => {
+  for (const details of [undefined, null, false, 1, "pi-vcc", [], {}, { compactor: null }]) {
+    const h = harness({ piVccAvailable: true });
+    h.clock.advance(IDLE_MS);
+    h.complete({ details });
+    assert.equal(h.state.notifications.some(({ text }) => text.includes("completed with pi-vcc")), false);
+  }
 });
 
 test("pi-vcc availability is checked for each compaction", () => {
@@ -418,7 +451,7 @@ for (const reason of ["Already compacted", "Nothing to compact (session too smal
 }
 
 test("empty and already-compacted sessions exit without a model request", () => {
-  const histories = [
+  const histories: HistoryEntry[][] = [
     [],
     [message("s1", "system"), { type: "custom", id: "meta1" }],
     [message("u1", "user"), { type: "compaction", id: "c1" }, { type: "custom", id: "meta1" }],

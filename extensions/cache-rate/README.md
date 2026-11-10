@@ -31,11 +31,11 @@ The extension runs only in TUI sessions. It includes the final response during `
 
 ## Checks
 
-From the global agent repository:
+Runtime checks from the global agent repository:
 
 ```text
-node --test extensions/cache-rate/cache-rate.test.mjs
-node extensions/cache-rate/verify-integration.mjs <installed-pi-package-directory>
+node --test extensions/cache-rate/cache-rate.test.ts
+node extensions/cache-rate/verify-integration.ts <installed-pi-package-directory>
 ```
 
 The integration check loads the real extension with the installed Pi, runs two synthetic responses through the normal agent lifecycle, and checks the installed Powerline configuration parser and custom renderer. Its model is local and deterministic, MCP is disabled, and all session/config fixtures stay in a disposable temporary directory. No user credentials or conversation contents are used.

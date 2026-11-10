@@ -97,11 +97,28 @@ The reserve controls automatic compaction timing, not summary output length.
 
 The gateway must already be running, as it does for Codex. Its credential was copied once into Pi's private `auth.json`; it is excluded from Git. Rotate that credential separately if the server credential changes.
 
+## TypeScript development
+
+Maintained local extensions, skill scripts, tests, and verification tools use directly executable TypeScript.
+Skill instructions remain Markdown; configuration and themes retain JSON.
+Installed third-party JavaScript and compiled host paths remain unchanged.
+
+One shared [tsconfig.json](tsconfig.json) covers extensions, skills, tests, theme checks, and shared fixtures.
+It enables strict checking, erasable syntax, explicit type imports, and no output generation.
+Its ESM configuration requires no root package manifest or runtime bundler.
+Checking tools and declarations stay in disposable OS temporary directories.
+
+The runtime baseline follows Pi's minimum supported LTS, Node.js 22.19; compatible newer LTS versions remain supported.
+Global agent instructions own the coding policy and reference [TYPESCRIPT.md](TYPESCRIPT.md) for detailed procedures.
+README files describe the configuration; agents do not depend on them for instructions.
+
 ## Instructions and version control
 
 `AGENTS.md` retains portable preferences from the Codex global instructions.
 These cover visible progress, bounded network requests, efficient changes, focused context, code inspection before edits, verification, and scoped reusable guidance.
-Temporary helpers and command orchestration use JavaScript and Node.js on every platform.
+Small disposable helpers and simple command orchestration prefer plain JavaScript with Node.js.
+Large or complex helpers use TypeScript when static checks materially improve safety or correctness.
+Temporary TypeScript helpers follow the shared checking rules; small JavaScript helpers need no compiler setup.
 
 The redundant single-agent rules were removed. Codex execution-cell, yield, session-handle, and shell-parameter instructions were replaced with guidance appropriate to Pi's command tools. Progress updates account for blocking tool calls.
 

@@ -1,26 +1,58 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeCacheUsage, formatCacheStatus, registerCacheRate, STATUS_KEY } from "./cache-rate.mjs";
+import {
+  computeCacheUsage,
+  formatCacheStatus,
+  registerCacheRate,
+  STATUS_KEY,
+  type CacheContext,
+  type CacheEntry,
+  type CacheEvent,
+  type CacheHandler,
+  type CacheMessage,
+} from "./cache-rate.ts";
 
-function assistant(usage = {}, stopReason = "toolUse") {
+function assistant(usage: CacheMessage["usage"] = {}, stopReason = "toolUse"): CacheMessage {
   return { role: "assistant", stopReason, usage: { input: 0, cacheRead: 0, cacheWrite: 0, ...usage } };
 }
-function entry(message) {
+function entry(message: CacheMessage): CacheEntry {
   return { type: "message", message };
 }
-function status(branch) {
+function status(branch: CacheEntry[]) {
   return formatCacheStatus(computeCacheUsage(branch));
 }
-function harness(mode = "tui") {
-  const handlers = new Map();
-  const state = { branch: [], updates: [], reads: 0 };
-  registerCacheRate({ on: (name, handler) => handlers.set(name, handler) });
+interface StatusUpdate {
+  key: string;
+  value: string | undefined;
+}
+
+interface HarnessState {
+  branch: CacheEntry[];
+  updates: StatusUpdate[];
+  reads: number;
+}
+
+function latestUpdate(state: HarnessState) {
+  const update = state.updates.at(-1);
+  assert.ok(update, "A status update must exist");
+  return update;
+}
+
+function harness(mode: CacheContext["mode"] = "tui") {
+  const handlers = new Map<CacheEvent["type"], CacheHandler>();
+  const state: HarnessState = { branch: [], updates: [], reads: 0 };
+  registerCacheRate({ on: (name, handler) => { handlers.set(name, handler); } });
   const ctx = {
     mode,
     sessionManager: { getBranch() { state.reads += 1; return state.branch; } },
-    ui: { setStatus: (key, value) => state.updates.push({ key, value }) },
-  };
-  return { state, emit: (name, event = {}) => handlers.get(name)(event, ctx) };
+    ui: { setStatus: (key, value) => { state.updates.push({ key, value }); } },
+  } satisfies CacheContext;
+  function emit(event: CacheEvent) {
+    const handler = handlers.get(event.type);
+    assert.ok(handler, `A handler must be registered for ${event.type}`);
+    handler(event, ctx);
+  }
+  return { state, emit };
 }
 
 test("cache writes belong in the denominator", () => {
@@ -114,7 +146,7 @@ test("registration performs no session reads or UI updates", () => {
 test("session start publishes the current branch", () => {
   const { state, emit } = harness();
   state.branch = [entry(assistant({ input: 100, cacheRead: 900 }))];
-  emit("session_start");
+  emit({ type: "session_start" });
   assert.deepEqual(state.updates.at(-1), { key: STATUS_KEY, value: "cache in: 900 (90.0%)" });
 });
 
@@ -122,51 +154,53 @@ test("message_end includes the response before persistence; turn_end does not do
   const { state, emit } = harness();
   state.branch = [entry(assistant({ input: 100, cacheRead: 900 }))];
   const ending = assistant({ cacheRead: 1000 });
-  emit("message_end", { message: ending });
-  assert.equal(state.updates.at(-1).value, "cache in: 1.9k (95.0%)");
+  emit({ type: "message_end", message: ending });
+  assert.equal(latestUpdate(state).value, "cache in: 1.9k (95.0%)");
   state.branch.push(entry(ending));
-  emit("turn_end");
-  assert.equal(state.updates.at(-1).value, "cache in: 1.9k (95.0%)");
+  emit({ type: "turn_end" });
+  assert.equal(latestUpdate(state).value, "cache in: 1.9k (95.0%)");
 });
 
 test("non-assistant message_end events do not trigger a history scan", () => {
   const { state, emit } = harness();
-  emit("message_end", { message: { role: "toolResult" } });
+  emit({ type: "message_end", message: { role: "toolResult" } });
   assert.equal(state.reads, 0);
 });
 
-for (const event of ["agent_settled", "session_tree", "session_compact"]) {
+for (const event of ["agent_settled", "session_tree", "session_compact"] as const) {
   test(`${event} refreshes from the authoritative current branch`, () => {
     const { state, emit } = harness();
     state.branch = [entry(assistant({ input: 200, cacheRead: 800 }))];
-    emit(event);
-    assert.equal(state.updates.at(-1).value, "cache in: 800 (80.0%)");
+    emit({ type: event });
+    assert.equal(latestUpdate(state).value, "cache in: 800 (80.0%)");
     state.branch = [];
-    emit(event);
-    assert.equal(state.updates.at(-1).value, undefined);
+    emit({ type: event });
+    assert.equal(latestUpdate(state).value, undefined);
   });
 }
 
 test("a new or resumed empty session clears the old status", () => {
   const { state, emit } = harness();
   state.branch = [entry(assistant({ cacheRead: 1000 }))];
-  emit("session_start");
+  emit({ type: "session_start" });
   state.branch = [];
-  emit("session_start");
-  assert.equal(state.updates.at(-1).value, undefined);
+  emit({ type: "session_start" });
+  assert.equal(latestUpdate(state).value, undefined);
 });
 
 test("shutdown removes only this extension's status", () => {
   const { state, emit } = harness();
-  emit("session_shutdown");
+  emit({ type: "session_shutdown" });
   assert.deepEqual(state.updates, [{ key: STATUS_KEY, value: undefined }]);
 });
 
 test("print, JSON, and RPC sessions do not read history or publish UI status", () => {
-  for (const mode of ["print", "json", "rpc"]) {
+  for (const mode of ["print", "json", "rpc"] as const) {
     const { state, emit } = harness(mode);
-    for (const event of ["session_start", "turn_end", "agent_settled", "session_tree", "session_compact", "session_shutdown"]) emit(event);
-    emit("message_end", { message: assistant({ cacheRead: 1000 }) });
+    for (const type of ["session_start", "turn_end", "agent_settled", "session_tree", "session_compact", "session_shutdown"] as const) {
+      emit({ type });
+    }
+    emit({ type: "message_end", message: assistant({ cacheRead: 1000 }) });
     assert.equal(state.reads, 0);
     assert.deepEqual(state.updates, []);
   }

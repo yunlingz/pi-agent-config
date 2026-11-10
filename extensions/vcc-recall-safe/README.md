@@ -39,10 +39,10 @@ The extension prompt redirects earlier instructions that mention `vcc_recall` to
 
 ## Checks
 
-From the global agent repository:
+Runtime checks from the global agent repository:
 
 ```text
-node --test extensions/vcc-recall-safe/request.test.mjs
+node --test extensions/vcc-recall-safe/request.test.ts
 ```
 
 The focused tests cover every action, modifier parsing, normalization, and invalid input. Live verification must also confirm that provider requests declare only `vcc_recall_safe` and that nested original calls succeed.

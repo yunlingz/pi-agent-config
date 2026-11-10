@@ -4,13 +4,14 @@ import {
   HistoryWindow,
   collectHiddenEntries,
   isDisplayEntry,
-} from "./history-window.mjs";
+  type DisplayEntry,
+} from "./history-window.ts";
 
-function message(id, role) {
+function message(id: string, role: string) {
   return { type: "message", id, message: { role } };
 }
 
-function manager(branch, context) {
+function manager(branch: DisplayEntry[], context: DisplayEntry[]) {
   return {
     getBranch: () => branch,
     buildContextEntries: () => context,
@@ -84,7 +85,9 @@ test("refresh keeps the earliest loaded entry when compaction adds history", () 
   const refreshed = window.refresh(afterCompaction, earliest);
 
   assert.equal(refreshed.earliestEntryId, earliest);
-  assert.equal(refreshed.selected.at(-1).id, "a8");
+  const lastEntry = refreshed.selected.at(-1);
+  assert.ok(lastEntry);
+  assert.equal(lastEntry.id, "a8");
 });
 
 test("load all reaches the beginning of saved history", () => {

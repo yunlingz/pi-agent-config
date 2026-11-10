@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AgentSession, TerminalInputHandler } from "@earendil-works/pi-coding-agent";
+import { testTUI, testUI, type TestWidget, type WidgetContent } from "../../scripts/test-fixtures.ts";
+import { readPackageInfo } from "../../scripts/verification-data.ts";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageArgument = process.argv[2];
-assert.ok(packageArgument, "Usage: node verify-integration.mjs <installed-pi-package-directory>");
+assert.ok(packageArgument, "Usage: node verify-integration.ts <installed-pi-package-directory>");
 const packageDirectory = resolve(packageArgument);
 const extensionDirectory = dirname(fileURLToPath(import.meta.url));
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "pi-session-history-check-"));
-const packageInfo = JSON.parse(readFileSync(join(packageDirectory, "package.json"), "utf8"));
-let session;
+const packageInfo = readPackageInfo(join(packageDirectory, "package.json"));
+let session: AgentSession | undefined;
 let phase = "loading installed Pi";
 let passed = false;
 const heartbeat = setInterval(() => {
@@ -28,8 +32,8 @@ function usage() {
   };
 }
 
-function assistant(text, index) {
-  const content = [{ type: "text", text }];
+function assistant(text: string, index: number): AssistantMessage {
+  const content: AssistantMessage["content"] = [{ type: "text", text }];
   if (index % 25 === 0) {
     content.push({
       type: "toolCall",
@@ -50,17 +54,17 @@ function assistant(text, index) {
   };
 }
 
-function plainText(lines, stripTerminalSequences) {
+function plainText(lines: string[], stripTerminalSequences: (text: string) => string) {
   return stripTerminalSequences(lines.join("\n"));
 }
 
 try {
-  const sdk = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
-  const tuiApi = await import(pathToFileURL(join(
+  const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
+  const tuiApi: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(join(
     packageDirectory,
     "node_modules/@earendil-works/pi-tui/dist/index.js",
   )).href);
-  const themeApi = await import(pathToFileURL(join(
+  const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(
     packageDirectory,
     "dist/modes/interactive/theme/theme.js",
   )).href);
@@ -165,36 +169,13 @@ try {
   document.addChild(resources);
   document.addChild(chat);
 
-  const inputListeners = new Set();
-  const widgets = new Map();
-  const notifications = [];
-  let renderedLines = [];
-  const fakeTui = {
-    mode: "fullscreen",
-    children: [document],
-    terminal: { columns: 140, rows: 45 },
-    viewportTop: 10_000,
-    isFollowingOutput: true,
-    hasOverlay: () => false,
-    requestRender() {},
-    renderNow() {
-      renderedLines = document.render(this.terminal.columns);
-    },
-    scrollBy(lines) {
-      this.viewportTop = Math.max(0, this.viewportTop + lines);
-      this.isFollowingOutput = false;
-    },
-    scrollToTop() {
-      this.viewportTop = 0;
-      this.isFollowingOutput = false;
-    },
-    scrollToBottom() {
-      this.viewportTop = Math.max(0, renderedLines.length - this.terminal.rows);
-      this.isFollowingOutput = true;
-    },
-  };
-  const uiContext = {
-    setWidget(key, content) {
+  const inputListeners = new Set<TerminalInputHandler>();
+  const widgets = new Map<string, TestWidget>();
+  const notifications: { message: string; type: string | undefined }[] = [];
+  let renderedLines: string[] = [];
+  const fakeTui = testTUI(document, (lines) => { renderedLines = lines; });
+  const uiContext = testUI(session, {
+    setWidget(key: string, content: WidgetContent) {
       widgets.get(key)?.dispose?.();
       widgets.delete(key);
       if (typeof content === "function") {
@@ -209,8 +190,8 @@ try {
     notify(message, type) {
       notifications.push({ message, type });
     },
-  };
-  const errors = [];
+  });
+  const errors: unknown[] = [];
   await session.bindExtensions({
     mode: "tui",
     uiContext,
@@ -249,11 +230,13 @@ try {
   phase = "checking reload state restoration and cleanup";
   fakeTui.viewportTop = 77;
   fakeTui.isFollowingOutput = false;
-  await session.extensionRunner.emit({ type: "session_shutdown", reason: "reload" });
+  const runner = session.extensionRunner;
+  assert.ok(runner);
+  await runner.emit({ type: "session_shutdown", reason: "reload" });
   assert.equal(document.children.length, 3);
   assert.equal(widgets.size, 0);
   assert.equal(inputListeners.size, 0);
-  await session.extensionRunner.emit({ type: "session_start", reason: "reload" });
+  await runner.emit({ type: "session_start", reason: "reload" });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   fakeTui.renderNow();
   assert.equal(document.children.length, 4);
@@ -287,7 +270,7 @@ try {
   clearInterval(heartbeat);
   try {
     if (session) {
-      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
       session.dispose();
     }
   } finally {

@@ -39,13 +39,13 @@ For built-in fallback, the trigger-only extension leaves summarization policy to
 
 ## Checks
 
-From the global agent repository:
+Runtime checks from the global agent repository:
 
 ```text
-node --test extensions/auto-compact/controller.test.mjs
-node extensions/auto-compact/verify-integration.mjs Q:/.tools/.npm-global/node_modules/@earendil-works/pi-coding-agent
-node extensions/auto-compact/verify-summary-integration.mjs Q:/.tools/.npm-global/node_modules/@earendil-works/pi-coding-agent
-node extensions/auto-compact/verify-vcc-integration.mjs Q:/.tools/.npm-global/node_modules/@earendil-works/pi-coding-agent
+node --test extensions/auto-compact/controller.test.ts
+node extensions/auto-compact/verify-integration.ts <installed-pi-package-directory>
+node extensions/auto-compact/verify-summary-integration.ts <installed-pi-package-directory>
+node extensions/auto-compact/verify-vcc-integration.ts <installed-pi-package-directory>
 ```
 
 The simulated-clock tests cover the 30-minute schedule, work guards, cancellation, repeated quits, queued input, session changes, and cleanup. They also cover `pi-vcc` availability, instruction handling, truthful completion messages, and stale callbacks. The first installed-Pi check verifies actual loading, keybindings, persistence and quit ordering with model requests blocked.

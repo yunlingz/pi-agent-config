@@ -1,10 +1,17 @@
+interface Modifiers {
+  page?: number;
+  scope?: string;
+}
+
+type RecallArguments = Modifiers & ({ query: string } | { range: [number, number] } | { expand: number[] } | { mode: "touched" });
+
 const ACTIONS = new Set(["search", "range", "expand", "touched", "file"]);
 
-function fail(message) {
+function fail(message: string): never {
   throw new Error(message);
 }
 
-function parseIndex(value, label) {
+function parseIndex(value: string, label: string) {
   const index = Number(value);
   if (!Number.isSafeInteger(index) || index < 0) {
     fail(`${label} must be a non-negative integer.`);
@@ -12,7 +19,7 @@ function parseIndex(value, label) {
   return index;
 }
 
-function parseModifiers(input) {
+function parseModifiers(input: string) {
   let payload = input.trim();
   let page;
   let scope;
@@ -35,7 +42,7 @@ function parseModifiers(input) {
   return { payload, page, scope };
 }
 
-function addModifiers(args, page, scope, supportsPage = true) {
+function addModifiers<T extends RecallArguments>(args: T, page: number | undefined, scope: string | undefined, supportsPage = true): T {
   if (!supportsPage && page !== undefined) {
     fail("This action does not support page.");
   }
@@ -44,7 +51,7 @@ function addModifiers(args, page, scope, supportsPage = true) {
   return args;
 }
 
-function parseRange(payload) {
+function parseRange(payload: string): [number, number] {
   const bracketed = payload.startsWith("[") || payload.endsWith("]");
   if (bracketed && !(payload.startsWith("[") && payload.endsWith("]"))) {
     fail("Range brackets must be paired.");
@@ -56,7 +63,7 @@ function parseRange(payload) {
   return first <= second ? [first, second] : [second, first];
 }
 
-function parseExpand(payload) {
+function parseExpand(payload: string) {
   const bracketed = payload.startsWith("[") || payload.endsWith("]");
   if (bracketed && !(payload.startsWith("[") && payload.endsWith("]"))) {
     fail("Expand brackets must be paired.");
@@ -68,14 +75,14 @@ function parseExpand(payload) {
   return [...new Set((value.match(/\d+/g) ?? []).map((item) => parseIndex(item, "Expand index")))];
 }
 
-function parseFile(payload) {
+function parseFile(payload: string) {
   const match = payload.match(/^#(\d+)(?::(.+))?$/);
   if (!match) fail("File input must use #N or #N:path syntax.");
   parseIndex(match[1], "File entry index");
   return payload;
 }
 
-export function buildRecallArguments(action, input) {
+export function buildRecallArguments(action: unknown, input: unknown): RecallArguments {
   if (typeof action !== "string") fail("Action must be text.");
   if (typeof input !== "string") fail("Input must be text.");
 
@@ -101,5 +108,7 @@ export function buildRecallArguments(action, input) {
     case "file":
       if (!payload) fail("File input cannot be empty.");
       return addModifiers({ query: parseFile(payload) }, page, scope, false);
+    default:
+      return fail(`Unsupported action: ${action}.`);
   }
 }

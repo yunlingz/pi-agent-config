@@ -1,5 +1,6 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Theme, ToolDefinition, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import type { TObject, TOptional, TString } from "typebox";
 
 export interface SearchArgs {
@@ -42,4 +43,8 @@ export interface SearchDetails {
 
 export type SearchResult = AgentToolResult<SearchDetails>;
 export type SearchTool = ToolDefinition<SearchParameters, SearchDetails>;
-export type SearchRenderers = Pick<SearchTool, "renderCall" | "renderResult">;
+export interface SearchRenderers {
+  renderCall(args: Partial<SearchArgs>, theme: Theme, context: { expanded: boolean }): Component;
+  renderResult(result: SearchResult, options: ToolRenderResultOptions, theme: Theme,
+    context: { durationMs: number | undefined; isError: boolean }): Component;
+}

@@ -1,3 +1,50 @@
+import type { ExtensionContext, ExtensionUIContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+
+export interface HistoryMessage {
+  role: string;
+  timestamp?: number;
+  command?: string;
+  excludeFromContext?: boolean;
+}
+
+export type HistoryEntry =
+  | { type: "message"; id: string; message: HistoryMessage }
+  | { type: Exclude<SessionEntry["type"], "message">; id: string };
+
+export interface CompactResult {
+  summary?: string;
+  details?: unknown;
+}
+
+export interface CompactRequest {
+  customInstructions?: string;
+  onComplete(result: CompactResult): void;
+  onError(error: Error): void;
+}
+
+export interface ControllerContext extends Pick<ExtensionContext, "mode" | "isIdle" | "hasPendingMessages" | "shutdown"> {
+  sessionManager: {
+    getBranch(): HistoryEntry[];
+    getLeafId(): string | null;
+  };
+  ui: Pick<ExtensionUIContext, "notify" | "getEditorText" | "setEditorText">;
+  compact(options: CompactRequest): void;
+}
+
+interface ControllerOptions {
+  now?: () => number;
+  setTimer?: (callback: () => void, delay: number) => NodeJS.Timeout;
+  clearTimer?: (handle: NodeJS.Timeout) => void;
+  hasPiVcc?: () => boolean;
+}
+
+interface CompactionAttempt {
+  generation: number;
+  marker?: string;
+  activitySerial: number;
+  reason: string;
+}
+
 export const IDLE_MS = 30 * 60 * 1000;
 export const QUIT_COMMAND = "compact-quit";
 
@@ -8,7 +55,7 @@ const NATIVE_NOOP_ERRORS = new Set([
   "Nothing to compact (session too small)",
 ]);
 
-function isContextEntry(entry) {
+function isContextEntry(entry: HistoryEntry) {
   if (entry.type === "message") {
     return entry.message.role !== "system"
       && !(entry.message.role === "bashExecution" && entry.message.excludeFromContext);
@@ -16,7 +63,7 @@ function isContextEntry(entry) {
   return ["custom_message", "branch_summary", "context_edit"].includes(entry.type);
 }
 
-export function inspectHistory(branch) {
+export function inspectHistory(branch: readonly HistoryEntry[]) {
   let marker;
   for (let index = branch.length - 1; index >= 0; index -= 1) {
     const entry = branch[index];
@@ -32,19 +79,36 @@ export function inspectHistory(branch) {
 
 // Rewrite only the editor text. Let Pi process the actual submit key normally,
 // so a selection dialog or custom editor cannot accidentally trigger a quit.
-export function routeQuitSubmission(ctx, isSubmit) {
+export function routeQuitSubmission(ctx: Pick<ControllerContext, "ui">, isSubmit: boolean) {
   if (isSubmit && ctx.ui.getEditorText().trim() === "/quit") {
     ctx.ui.setEditorText(`/${QUIT_COMMAND}`);
   }
 }
 
 export class AutoCompactController {
+  now: () => number;
+  setTimer: NonNullable<ControllerOptions["setTimer"]>;
+  clearTimer: NonNullable<ControllerOptions["clearTimer"]>;
+  hasPiVcc: () => boolean;
+  generation: number;
+  context: ControllerContext | undefined;
+  timer: NodeJS.Timeout | undefined;
+  compaction: CompactionAttempt | undefined;
+  quitting: boolean;
+  promptDepth: number;
+  runningTools: Set<string>;
+  pendingShell: { command: string; startedAt: number; afterId: string | null } | undefined;
+  noopMarker: string | undefined;
+  activitySerial: number;
+  idleAttempted: boolean;
+  lastActivityAt: number;
+
   constructor({
     now = Date.now,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
     hasPiVcc = () => false,
-  } = {}) {
+  }: ControllerOptions = {}) {
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -63,7 +127,7 @@ export class AutoCompactController {
     this.lastActivityAt = 0;
   }
 
-  start(ctx) {
+  start(ctx: ControllerContext) {
     this.stop();
     if (ctx.mode !== "tui") {
       return;
@@ -114,12 +178,12 @@ export class AutoCompactController {
     }
   }
 
-  toolStarted(toolCallId) {
+  toolStarted(toolCallId: string) {
     this.runningTools.add(toolCallId);
     this.beforeWork();
   }
 
-  toolEnded(toolCallId) {
+  toolEnded(toolCallId: string) {
     this.runningTools.delete(toolCallId);
     this.activity();
   }
@@ -136,7 +200,7 @@ export class AutoCompactController {
     }
   }
 
-  shellStarted(command) {
+  shellStarted(command: string) {
     if (!this.context) {
       return;
     }
@@ -148,7 +212,7 @@ export class AutoCompactController {
     this.activity();
   }
 
-  requestQuit(ctx) {
+  requestQuit(ctx: ControllerContext) {
     if (!this.context || ctx.mode !== "tui") {
       ctx.ui.notify("Auto-compact quit is available in interactive TUI sessions only.", "warning");
       return;
@@ -171,7 +235,7 @@ export class AutoCompactController {
     }
   }
 
-  schedule(delay) {
+  schedule(delay: number) {
     this.cancelTimer();
     if (!this.context || this.compaction || this.isPromptOpen) {
       return;
@@ -186,7 +250,7 @@ export class AutoCompactController {
     this.timer.unref();
   }
 
-  refreshShellState(branch) {
+  refreshShellState(branch: readonly HistoryEntry[]) {
     if (!this.pendingShell) {
       return false;
     }
@@ -196,10 +260,11 @@ export class AutoCompactController {
       if (entry.id === pending.afterId) {
         break;
       }
-      if (entry.type === "message" && entry.message.role === "bashExecution"
-        && entry.message.command === pending.command
-        && entry.message.timestamp >= pending.startedAt) {
-        this.lastActivityAt = Math.max(this.lastActivityAt, entry.message.timestamp);
+      const message = entry.type === "message" ? entry.message : undefined;
+      if (message?.role === "bashExecution"
+        && message.command === pending.command
+        && message.timestamp !== undefined && message.timestamp >= pending.startedAt) {
+        this.lastActivityAt = Math.max(this.lastActivityAt, message.timestamp);
         this.pendingShell = undefined;
         return false;
       }
@@ -245,11 +310,10 @@ export class AutoCompactController {
       }
       return;
     }
-    this.beginCompaction(history.marker);
+    this.beginCompaction(ctx, history.marker);
   }
 
-  beginCompaction(marker) {
-    const ctx = this.context;
+  beginCompaction(ctx: ControllerContext, marker: string | undefined) {
     const attempt = {
       generation: this.generation,
       marker,
@@ -262,13 +326,14 @@ export class AutoCompactController {
       ? "Compacting the session before exit."
       : "Compacting the session after 30 minutes of inactivity.", "info");
 
-    const finish = (error, result) => {
+    const finish = (error?: unknown, result?: CompactResult) => {
       if (this.compaction !== attempt || this.generation !== attempt.generation) {
         return;
       }
       this.compaction = undefined;
       // Pi 1.3 reports normal no-ops as plain Error objects rather than codes.
-      const noop = error && NATIVE_NOOP_ERRORS.has(error.message);
+      const noop = typeof error === "object" && error !== null && "message" in error
+        && typeof error.message === "string" && NATIVE_NOOP_ERRORS.has(error.message);
       if (error && !noop) {
         const wasQuitting = this.quitting;
         this.quitting = false;
@@ -279,9 +344,11 @@ export class AutoCompactController {
           : "Idle compaction failed or was cancelled. Use /compact to retry.", "warning");
         return;
       }
+      const details = result?.details;
       if (noop) {
         this.noopMarker = attempt.marker;
-      } else if (result?.details?.compactor === "pi-vcc") {
+      } else if (typeof details === "object" && details !== null
+        && "compactor" in details && details.compactor === "pi-vcc") {
         ctx.ui.notify("Auto-compaction completed with pi-vcc.", "info");
       }
       if (this.quitting) {

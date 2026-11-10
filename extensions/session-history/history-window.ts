@@ -1,3 +1,15 @@
+export interface DisplayEntry {
+  type: string;
+  id?: string;
+  message?: { role: string };
+  display?: boolean;
+}
+
+interface HistoryManager<Entry extends DisplayEntry> {
+  getBranch(): Entry[];
+  buildContextEntries(): Entry[];
+}
+
 export const DEFAULT_INITIAL_ENTRIES = 50;
 export const DEFAULT_LOAD_ENTRIES = 50;
 export const DEFAULT_PRELOAD_SCREENS = 2;
@@ -9,9 +21,9 @@ const DISPLAY_MESSAGE_ROLES = new Set([
   "bashExecution",
 ]);
 
-export function isDisplayEntry(entry) {
+export function isDisplayEntry(entry: DisplayEntry | null | undefined) {
   if (entry?.type === "message") {
-    return DISPLAY_MESSAGE_ROLES.has(entry.message?.role);
+    return DISPLAY_MESSAGE_ROLES.has(entry.message?.role ?? "");
   }
   if (entry?.type === "custom_message") {
     return entry.display === true;
@@ -19,7 +31,7 @@ export function isDisplayEntry(entry) {
   return entry?.type === "compaction" || entry?.type === "branch_summary";
 }
 
-export function collectHiddenEntries(sessionManager) {
+export function collectHiddenEntries<Entry extends DisplayEntry>(sessionManager: HistoryManager<Entry>) {
   const visibleIds = new Set(
     sessionManager.buildContextEntries().map((entry) => entry.id),
   );
@@ -29,7 +41,7 @@ export function collectHiddenEntries(sessionManager) {
     .filter((entry) => isDisplayEntry(entry) && !visibleIds.has(entry.id));
 }
 
-function alignStart(entries, requestedStart) {
+function alignStart(entries: readonly DisplayEntry[], requestedStart: number) {
   let start = Math.max(0, Math.min(requestedStart, entries.length));
   if (start === 0 || start === entries.length) {
     return start;
@@ -46,7 +58,12 @@ function alignStart(entries, requestedStart) {
   return start;
 }
 
-export class HistoryWindow {
+export class HistoryWindow<Entry extends DisplayEntry = DisplayEntry> {
+  initialEntries: number;
+  loadEntries: number;
+  entries: Entry[];
+  start: number;
+
   constructor({
     initialEntries = DEFAULT_INITIAL_ENTRIES,
     loadEntries = DEFAULT_LOAD_ENTRIES,
@@ -57,7 +74,7 @@ export class HistoryWindow {
     this.start = 0;
   }
 
-  refresh(entries, earliestEntryId) {
+  refresh(entries: Entry[], earliestEntryId?: string) {
     this.entries = entries;
 
     const restoredStart = earliestEntryId

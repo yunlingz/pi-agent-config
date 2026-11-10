@@ -107,13 +107,23 @@ Its Pi, project-package, migration, and push exclusions remain active within tha
 
 - Run installed-Pi schema validation, global skill discovery, and the real read-only session required by `sync-pi-config`.
 - Preserve the configured model, thinking level, and global resources in that live check.
-- Run the documented checks for:
-  - [Auto-compact](../../extensions/auto-compact/README.md): unit tests, native compaction, failure handling, quit ordering, and actual pi-vcc integration.
-  - [Cache-rate](../../extensions/cache-rate/README.md): unit tests and integration with installed Pi and Powerline.
-  - [Session history](../../extensions/session-history/README.md): lazy loading, lifecycle, full extension compatibility, and compaction integration.
-  - [Themes](../../themes/README.md): installed schema, native loader, supported color modes, and rendering checks.
+- From the agent directory, run the focused unit tests:
+
+  ```text
+  node --test extensions/auto-compact/controller.test.ts extensions/cache-rate/cache-rate.test.ts extensions/session-history/history-window.test.ts extensions/vcc-recall-safe/request.test.ts extensions/web-search/web-search.test.ts scripts/verification-data.test.ts
+  ```
+
+- Run these scripts with `node <script> <installed-pi-package-directory>`:
+  - `extensions/auto-compact/verify-integration.ts`: native compaction, persistence, and quit ordering.
+  - `extensions/auto-compact/verify-summary-integration.ts`: summary limits, failure handling, and explicit retry.
+  - `extensions/auto-compact/verify-vcc-integration.ts`: actual pi-vcc compaction and shared history cleanup.
+  - `extensions/cache-rate/verify-integration.ts`: installed Pi lifecycle and Powerline integration.
+  - `extensions/session-history/verify-integration.ts`: loading, view state, and unchanged model context.
+  - `extensions/session-history/verify-plugin-compatibility.ts`: configured extensions and shared TUI lifecycle.
+  - `extensions/web-search/verify-integration.ts`: request isolation, reasoning, controls, usage, and rendering.
+  - `themes/verify.ts`: installed schema, color modes, contrast, and rendering.
 - Exercise updated third-party tools with suitable existing automatic checks.
-  Use actual installed extension implementations; add temporary Node.js fixtures only for material coverage gaps.
+  Use actual installed extensions; add temporary fixtures only for material coverage gaps.
   Do not install extra tooling merely to run unpublished test suites.
 - When a check fails, reproduce the failure and compare current release notes, public APIs, and documented contracts.
   Correct outdated test expectations only when evidence confirms an intentional upstream change.

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { buildRecallArguments } from "./request.mjs";
+import { buildRecallArguments } from "./request.ts";
 
 const ORIGINAL_TOOL = "vcc_recall";
 const SAFE_TOOL = "vcc_recall_safe";

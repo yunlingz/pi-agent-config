@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getKeybindings } from "@earendil-works/pi-tui";
-import { AutoCompactController, QUIT_COMMAND, routeQuitSubmission } from "./controller.mjs";
+import { AutoCompactController, QUIT_COMMAND, routeQuitSubmission } from "./controller.ts";
 
 export default function (pi: ExtensionAPI) {
   const controller = new AutoCompactController({

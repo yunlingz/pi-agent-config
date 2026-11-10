@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRecallArguments } from "./request.mjs";
+import { buildRecallArguments } from "./request.ts";
 
 test("search preserves text and parses trailing modifiers", () => {
   assert.deepEqual(
@@ -47,7 +47,7 @@ test("invalid actions and payloads fail clearly", () => {
     ["expand", "one,two", /entry indices/],
     ["touched", "unexpected", /only page or scope/],
     ["file", "12:path", /#N or #N:path/],
-  ]) {
+  ] as const) {
     assert.throws(() => buildRecallArguments(action, input), pattern);
   }
 });
@@ -59,7 +59,7 @@ test("invalid or duplicate modifiers fail", () => {
     ["search", "text scope:all scope:lineage", /scope only once/],
     ["expand", "1 page:2", /does not support page/],
     ["file", "#1 page:2", /does not support page/],
-  ]) {
+  ] as const) {
     assert.throws(() => buildRecallArguments(action, input), pattern);
   }
 });

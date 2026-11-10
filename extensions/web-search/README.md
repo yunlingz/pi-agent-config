@@ -118,7 +118,7 @@ The tool reports nested token usage to Pi's session totals. Provider search fees
 
 Copy this directory to `~/.pi/agent/extensions/web-search`, then run `/reload`.
 The extension is TypeScript. Pi loads it directly; there is no compilation or generated JavaScript.
-The test scripts run directly with Node.js 24's TypeScript support.
+The runtime baseline is Node.js 22.19, following Pi; compatible newer LTS versions remain supported.
 No runtime dependency installation is needed beyond the compatible Pi installation.
 Installed-Pi integration checks target Pi 1.4.0.
 
