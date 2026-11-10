@@ -47,6 +47,9 @@ Node.js strips types during execution; it does not check them.
 Run strict static checks for new or changed TypeScript before reporting completion.
 Passing runtime tests and passing static checks cover different requirements; neither replaces the other.
 
+Follow the temporary-directory ownership rules in `AGENTS.md`.
+Run steps 2–7 inside the directory owner's `try` block. Its `finally` block must perform step 8.
+
 1. Create a uniquely named, task-owned OS temporary directory.
 2. Install the Go-based TypeScript compiler and baseline Node.js declarations there, with lifecycle scripts disabled.
 3. Resolve required host declarations from installed Pi package metadata, including hoisted dependencies.
@@ -54,7 +57,7 @@ Passing runtime tests and passing static checks cover different requirements; ne
 5. Set temporary declaration paths and include all maintained source, tests, verifiers, fixtures, and temporary TypeScript helpers.
 6. Run the compiler with `noEmit` and `erasableSyntaxOnly` enabled.
 7. Run the relevant runtime tests against the actual implementation.
-8. Remove owned temporary tools and artifacts after verification.
+8. Remove the owned directory in `finally`, including after setup, installation, or checking failures.
 
 For stable Go-based releases distributed as `typescript`, the CLI command is:
 

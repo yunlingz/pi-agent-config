@@ -285,10 +285,14 @@ Review complex or high-risk content more closely. Do not add routine model reque
     - Use `fs.mkdtemp` with `os.tmpdir()` where suitable.
     - If helper dependencies are necessary, install them locally in that directory.
     - Never install helper dependencies globally or in the user's project.
-  - Use `try/finally` for cleanup.
-    - Remove owned temporary processes, scripts, dependencies, and artifacts, including after failure where possible.
+  - Make the workflow that creates a temporary directory responsible for removing it.
+    - Enter `try/finally` immediately after creation, before setup, dependency installation, or execution.
+    - Remove the owned directory in `finally`, after success or failure where possible.
+    - Do not rely on a later agent tool call for cleanup.
+    - Stop and await owned child processes before removing their scripts, dependencies, and artifacts.
     - Delete only paths created for the current task.
     - Preserve requested deliverables.
+    - Check that the owned directory is absent before reporting cleanup success.
     - Report cleanup that could not be completed.
 
 ## Keep reusable instructions concise and scoped
