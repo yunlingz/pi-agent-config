@@ -12,7 +12,7 @@ import type { SearchDetails } from "./types.ts";
 import type { VerificationAudit } from "./verification-fixtures.ts";
 
 const [packageArgument, modelId] = process.argv.slice(2);
-const levels: Record<string, string> = { "gpt-6-astra": "medium", "gpt-6.1-sol": "xhigh", "gpt-6.1-terra": "max" };
+const levels: Record<string, string> = { "gpt-6-astra": "high", "gpt-6.1-sol": "xhigh", "gpt-6.1-terra": "max" };
 assert.ok(packageArgument && modelId && levels[modelId], "Usage: node verify-live.ts <installed-pi-package-directory> <model-id>");
 const packageDirectory = resolve(packageArgument);
 const extensionDirectory = dirname(fileURLToPath(import.meta.url));

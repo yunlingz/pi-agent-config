@@ -89,9 +89,14 @@ The default theme is [ci_dark](themes/README.md), adapted from your iTerm palett
 
 ## Model and credentials
 
-`settings.json` selects `existing_gateway/gpt-latest` with `max` reasoning effort. `models.json` uses the same Responses API gateway as Codex, at `http://127.0.0.1:48081`, with text/image input, a configured context window of 1,050,000 tokens and maximum output allowance of 128,000. The thinking map enables `xhigh` and `max` for this custom model ID.
+`settings.json` selects `existing_gateway/gpt-6.1-sol` with `xhigh` reasoning effort for new sessions.
+Per-model settings and thinking maps restrict Astra to `high`, Sol to `xhigh`, and Terra to `max`.
+`models.json` uses the Responses API gateway at `http://127.0.0.1:48080`, with text/image input.
+Each model has a configured context window of 1,050,000 tokens and a maximum output allowance of 128,000 tokens.
+Independent web searches retain `low` effort without changing the main session's effort.
+Resumed sessions restore their saved model and effort; startup defaults do not replace session history.
 
-Automatic compaction is enabled. A native `compaction.modelOverrides` entry reserves 192,000 tokens for `existing_gateway/gpt-latest`: 128,000 for output plus 64,000 extra headroom below the approximately 922,000-token usable-input ceiling observed upstream. The nominal threshold is above 858,000 context tokens; native checks and overflow recovery still govern actual timing. For built-in compaction, recent-history retention remains at Pi's 20,000-token default. Other models retain the default 16,384-token reserve. Codex's 820,000-token trigger is not migrated. These are native configuration values, not auto-compact plugin overrides.
+Automatic compaction is enabled. Native `compaction.modelOverrides` entries reserve 192,000 tokens for each of the three configured models: 128,000 for output plus 64,000 extra headroom below the approximately 922,000-token usable-input ceiling observed upstream. The nominal threshold is above 858,000 context tokens; native checks and overflow recovery still govern actual timing. For built-in compaction, recent-history retention remains at Pi's 20,000-token default. Other models retain the default 16,384-token reserve. Codex's 820,000-token trigger is not migrated. These are native configuration values, not auto-compact plugin overrides.
 
 On Pi 1.4.0, native summaries use the model's output limit.
 The reserve controls automatic compaction timing, not summary output length.

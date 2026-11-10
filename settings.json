@@ -1,16 +1,16 @@
 {
   "theme": "ci_dark",
   "defaultProvider": "existing_gateway",
-  "defaultModel": "gpt-6-astra",
+  "defaultModel": "gpt-6.1-sol",
   "transport": "sse",
   "enabledModels": [
     "existing_gateway/gpt-6-astra",
     "existing_gateway/gpt-6.1-sol",
     "existing_gateway/gpt-6.1-terra"
   ],
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "xhigh",
   "modelThinkingLevels": {
-    "existing_gateway/gpt-6-astra": "medium",
+    "existing_gateway/gpt-6-astra": "high",
     "existing_gateway/gpt-6.1-sol": "xhigh",
     "existing_gateway/gpt-6.1-terra": "max"
   },

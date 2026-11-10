@@ -23,7 +23,7 @@ Search starts enabled for these `existing_gateway` models with `api: "openai-res
 
 | Model | Main-session effort, unchanged |
 | --- | --- |
-| `gpt-6-astra` | `medium` |
+| `gpt-6-astra` | `high` |
 | `gpt-6.1-sol` | `xhigh` |
 | `gpt-6.1-terra` | `max` |
 

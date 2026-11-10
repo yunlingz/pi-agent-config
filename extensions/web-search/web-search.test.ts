@@ -6,7 +6,7 @@ import type { SearchParameters, SearchResult } from "./types.ts";
 import { createBudgetedFetch, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, runSearch, searchPayload, type SearchRegistry } from "./search-request.ts";
 import { registerWebSearch, SEARCH_GUIDELINES, STATE_TYPE, TOOL_NAME, type RegisteredSearchTool, type SearchContext, type SearchEntry, type SearchExtension, type SearchStartEvent } from "./web-search.ts";
 
-const MODELS = [["gpt-6-astra", "medium"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
+const MODELS = [["gpt-6-astra", "high"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
 const PARAMETERS = {
   "~kind": "Object", type: "object", required: ["query"],
   properties: {

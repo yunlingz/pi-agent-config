@@ -24,7 +24,7 @@ assert.equal(packageInfo.name, "@earendil-works/pi-coding-agent");
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-web-search-integration-"));
 const require = createRequire(pathToFileURL(join(packageDirectory, "package.json")));
 const originalFetch = globalThis.fetch;
-const modelLevels = [["gpt-6-astra", "medium"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
+const modelLevels = [["gpt-6-astra", "high"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
 const statuses = new Map<string, string>();
 const updates: SearchResult[] = [];
 const errors: unknown[] = [];
