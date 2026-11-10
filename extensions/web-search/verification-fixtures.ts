@@ -24,6 +24,7 @@ export type VerificationAudit = {
   toolTypes: string[] | undefined;
   names: (string | undefined)[] | undefined;
   toolChoice: unknown;
+  hasSearchGuidance: boolean;
 };
 
 export interface FixtureMessage {

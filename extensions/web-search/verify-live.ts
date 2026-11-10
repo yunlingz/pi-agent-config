@@ -42,15 +42,16 @@ export default createObserver(${JSON.stringify(auditPath)});
     join(packageDirectory, "dist/cli.js"), "--no-mcp", "--no-extensions",
     "--extension", join(extensionDirectory, "index.ts"), "--extension", observerPath,
     "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-themes",
-    "--offline", "--approve", "--no-session", "--mode", "json", "--tools", "read,web_run",
+    "--offline", "--approve", "--no-session", "--mode", "json", "--tools", "read,bash,web_run",
     "--provider", "existing_gateway", "--model", modelId, "--thinking", levels[modelId],
-    "--system-prompt", "You are testing independent web search and local read compatibility. Follow the user's requests exactly. Keep answers brief.",
+    "--append-system-prompt", "Keep answers brief. Do not change files. Use Node.js for any scripts. Do not use MCP.",
     "Transform this supplied text to uppercase: stable_test_ok. Reply with only the transformed text.",
-    "Use web_run to search the official Node.js website. What is Node.js? Return one sentence and a source citation. Do not use read for this answer.",
+    "What is the current Node.js LTS version? Include an official source link.",
+    "Shorten that answer to one sentence.",
     "/web-search off",
     "Do not search. Read marker.txt with read. Return its exact marker and one source URL from your previous answer. Do not change files.",
   ];
-  console.log(`START: ${modelId}; no-search task, independent search, off control, and read follow-up; 240-second limit`);
+  console.log(`START: ${modelId}; no-search task, model-selected search, evidence reuse, off control, and read follow-up; 240-second limit`);
   const processChild = spawn(process.execPath, args, {
     cwd: temporaryDirectory, shell: false, windowsHide: true,
     env: { ...process.env, PI_CODING_AGENT_DIR: agentDirectory, PI_OFFLINE: "1", PI_TELEMETRY: "0" },
@@ -99,7 +100,7 @@ export default createObserver(${JSON.stringify(auditPath)});
     assert.deepEqual(request.reasoning, { effort: "low" });
     assert.deepEqual(request.configurationUpdates, []);
   }
-  assert.ok(audit.length >= 5, "Require the stable answer, research call/follow-up, and read call/follow-up");
+  assert.ok(audit.length >= 6, "Require the stable answer, research call/follow-up, evidence reuse, and read call/follow-up");
   for (const request of audit) {
     assert.equal(request.model, modelId);
     assert.equal(request.effort, levels[modelId]);
@@ -107,6 +108,10 @@ export default createObserver(${JSON.stringify(auditPath)});
     assert.notEqual(request.toolChoice, "required");
   }
   assert.ok(audit[0].names?.includes("web_run"));
+  assert.equal(audit[0].hasSearchGuidance, true, "The first model request must contain all registered search guidelines");
+  assert.ok(audit[0].names?.includes("bash"), "Shell access must be available to test tool selection");
+  assert.ok(!messages.some((message) => message.role === "toolResult" && message.toolName === "bash"),
+    "A routine question with sufficient search findings must not trigger shell retrieval");
   const lastAudit = audit.at(-1);
   assert.ok(lastAudit?.names);
   assert.ok(!lastAudit.names.includes("web_run"), "Off removes the main tool declaration");
@@ -118,7 +123,7 @@ export default createObserver(${JSON.stringify(auditPath)});
   }
   // The only web_run implementation in this isolated session writes SearchDetails to its tool results.
   const searches = messages.filter((message): message is ToolResultMessage<SearchDetails> => message.role === "toolResult" && message.toolName === "web_run");
-  assert.equal(searches.length, 1, "One deliberate search call is sufficient");
+  assert.equal(searches.length, 1, "The model must select search once and reuse the findings for the follow-up");
   const search = searches[0];
   assert.equal(search.isError, false, search.details?.error ?? "Independent search failed");
   assert.equal(search.details?.model, modelId);
@@ -138,7 +143,7 @@ export default createObserver(${JSON.stringify(auditPath)});
   assert.match(finalText, new RegExp(marker));
   assert.match(finalText, /https?:\/\//u);
   passed = true;
-  console.log(`PASS: ${modelId}; main effort ${levels[modelId]}, search effort low, ${search.usage.reasoning} reasoning tokens, ${(search.details.elapsedMs / 1000).toFixed(1)}s search, ${search.details.inputTokens} counted input tokens, ${search.details.sources.length} sources; no-search task and off control passed`);
+  console.log(`PASS: ${modelId}; main effort ${levels[modelId]}, search effort low, ${search.usage.reasoning} reasoning tokens, ${(search.details.elapsedMs / 1000).toFixed(1)}s search, ${search.details.inputTokens} counted input tokens, ${search.details.sources.length} sources; model-selected search, evidence reuse without bash, no-search task, and off control passed`);
 } finally {
   clearInterval(heartbeat);
   clearTimeout(timeout);

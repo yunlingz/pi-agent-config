@@ -41,7 +41,10 @@ Explicit CLI tool exclusions remain respected until `/web-search on` enables the
 With no argument, the command shows the current state.
 The preference belongs to the active session branch. Reloading and resuming restore it.
 New sessions start enabled for supported models, unless tool selection excludes `web_run`.
-When search is off, the extension removes its declaration and rejects stale calls without making network requests.
+When search is off or unsupported, Pi omits its declaration, snippet, and guidelines from the main model's generated prompt.
+The extension preserves existing prompt sections and rejects stale calls without making search requests.
+The control command, status display, and saved preference remain available. Existing conversation history remains unchanged.
+Search behavior guidance belongs to the active tool and independent request, not global `AGENTS.md`.
 When the upstream service cannot search, use `/web-search off` to continue without this tool.
 Wait for the current response, or cancel it, before changing the preference.
 
@@ -57,17 +60,25 @@ Without Powerline, Pi's standard extension status display receives the same valu
 
 ## When to search
 
-The main model receives conditional tool guidance:
+The main model receives guidance to search proactively when external context can materially improve an answer.
+It does not need an explicit lookup request.
+Triggers include changing facts, uncertain claims, recommendations, missing source content, and current API or library documentation.
+Self-contained tasks and casual conversation do not need search.
+Local code work can use search when external facts would help.
 
-- Search for explicit lookup requests, current facts, source verification, and material uncertainty requiring external evidence.
-- Reuse sufficient existing evidence.
-- Skip search for stable knowledge, supplied-text tasks, local code work, and casual conversation unless external facts are needed.
-- Honor requests not to browse.
-- Send only a focused query and necessary context. Do not send secrets or private file contents.
+For routine questions, the guidance favors a useful answer with brief uncertainty, followed by stopping.
+Sufficient findings are reused, not independently checked again through `curl`, scripts, or another lookup.
+Further retrieval depends on requested precision, consequences of error, or necessary missing information.
+For example, a simple stock-price question can receive a reported price, its date/session, and a short qualification.
+It does not require resolving every discrepancy or obtaining a trading-grade live feed.
 
-This guidance does not force the main model to call the tool.
-Once it deliberately calls `web_run`, the independent request requires native search and returns source-backed findings.
+Requests not to browse, privacy limits, and citation requirements remain active.
 Search results are evidence, not instructions.
+The independent search prompt also limits routine research depth and asks for concise uncertainty reporting.
+
+This guidance does not force the main model to call the tool or impose a fixed search count.
+Once it deliberately calls `web_run`, the independent request requires native search.
+Prompt changes cannot guarantee a particular invocation frequency or eliminate all redundant checks.
 
 ## Context and request limits
 
@@ -99,12 +110,16 @@ Low effort does not guarantee a response time. Gateway waits, source retrieval, 
 The compact display uses two lines:
 
 - The `web.run` label.
-- A short phase, source count, or failure state, with elapsed time when space permits.
+- A short phase, completion label, or failure state, with elapsed time when space permits.
 
 It does not show the query, source domains, result previews, or trailing truncation marks.
 When space is limited, the status line removes elapsed time before shortening its label.
 Use Pi's normal tool expansion control to view the full query, findings, source links, model, reasoning setting, and counted input tokens.
 The expanded view renders Markdown links through Pi's standard renderer.
+Successful searches show `Searched` regardless of citation metadata. Errors and cancellations retain distinct labels.
+The status reports execution outcome, not the number of sources or the accuracy of the findings.
+A plain answer link is not counted as a structured citation.
+This separates activity from citation metadata, as in [Codex's search cell](https://github.com/openai/codex/blob/main/codex-rs/tui/src/history_cell/search.rs).
 The extension follows the active theme and supports narrow terminal widths.
 It does not replace the editor, footer, or terminal renderer.
 
@@ -132,9 +147,11 @@ node verify-integration.ts <installed-pi-package-directory>
 The integration check uses the installed Pi transport, extension loader, tool execution, persistence, usage accounting, and renderers.
 It checks explicit `low` reasoning on all three search models while preserving each main-session effort.
 It also tests isolated context, budgets, citations, local `read`, controls, model switching, and Powerline states.
+Off and unsupported states must match a session without the extension in effective prompt, active tool definitions, model, and reasoning effort.
 It uses local transport fixtures. MCP and external network access are disabled.
 Rendered checks cover both theme color modes, long query and table content, narrow widths, and terminals with and without clickable links.
 Collapsed searches must use two lines without query text, result previews, or ellipses.
+Rendering checks cover completed searches with and without structured citations, progress phases, failures, cancellations, and plain answer links.
 
 The following checks make real requests through saved gateway credentials and can incur charges:
 
@@ -145,10 +162,15 @@ node verify-live.ts <installed-pi-package-directory> gpt-6.1-terra
 ```
 
 Each check starts Pi with `--no-mcp`, this extension, and a temporary observer.
-It tests a no-search text task, one explicit search, disabling search, and a local `read` follow-up.
+It retains Pi's normal system prompt and appends brief test constraints.
+The observer checks that the first serialized model request contains all registered search guidelines, without logging the prompt.
+It tests a supplied-text task, a current-fact question without an explicit tool instruction, a shortening request, disabling search, and local `read`.
+The shell tool remains available; the check requires one model-selected search and no shell retrieval.
+The shortening request must reuse existing findings without another search.
 It audits both serialized search requests for `effort: "low"` and checks provider-reported reasoning usage.
 It also checks that main-session effort stays unchanged and reports the measured search duration.
 The process limit is 240 seconds. Main test responses have an 8,192-token limit; the independent search retains its 32,000-token ceiling.
 Temporary files are removed after the check. Saved configuration files are not changed.
+A passing run covers these prompts and that model; it does not establish a general search-selection rate.
 
 Reference: [OpenAI web search guide](https://developers.openai.com/api/docs/guides/tools-web-search?api-mode=responses).

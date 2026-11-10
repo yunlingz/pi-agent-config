@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { VerificationAudit, VerificationPayload } from "./verification-fixtures.ts";
+import { SEARCH_GUIDELINES } from "./web-search.ts";
 
 export function createObserver(auditPath: string): (pi: ExtensionAPI) => void {
   function record(event: VerificationAudit): void {
@@ -33,6 +34,7 @@ export function createObserver(auditPath: string): (pi: ExtensionAPI) => void {
         type: "main", model: payload.model, effort: efforts.at(-1) ?? payload.reasoning?.effort,
         toolTypes: payload.tools?.map((tool) => tool.type), names: payload.tools?.map((tool) => tool.name),
         toolChoice: payload.tool_choice,
+        hasSearchGuidance: SEARCH_GUIDELINES.every((guideline) => JSON.stringify(payload).includes(guideline)),
       });
       return { ...payload, max_output_tokens: 8192 };
     });

@@ -29,6 +29,7 @@ const statuses = new Map<string, string>();
 const updates: SearchResult[] = [];
 const errors: unknown[] = [];
 let session: AgentSession | undefined;
+let baseline: AgentSession | undefined;
 let currentModel: string;
 let currentLevel: string;
 let mainIndex = 0;
@@ -79,6 +80,18 @@ function message(text: string, annotations: CitationAnnotation[] = []): FixtureM
 
 function toolCall(name: string, args: Record<string, string>): FixtureToolCall {
   return { type: "function_call", id: `fc_${name}`, call_id: `call_${name}`, name, arguments: JSON.stringify(args), status: "completed" };
+}
+
+function assertDisabledMatchesBaseline(actual: AgentSession, expected: AgentSession): void {
+  assert.equal(actual.systemPrompt, expected.systemPrompt, "Disabled search must not change the effective prompt");
+  assert.deepEqual(actual.getActiveToolNames(), expected.getActiveToolNames());
+  assert.deepEqual(
+    actual.getAllTools().filter((tool) => actual.getActiveToolNames().includes(tool.name)),
+    expected.getAllTools().filter((tool) => expected.getActiveToolNames().includes(tool.name)),
+    "Disabled search must not change active tool definitions",
+  );
+  assert.deepEqual(actual.model, expected.model);
+  assert.equal(actual.thinkingLevel, expected.thinkingLevel);
 }
 
 try {
@@ -170,6 +183,19 @@ try {
       resourceLoader: loader, sessionManager: sdk.SessionManager.inMemory(), tools: ["read", "web_run"],
     }));
     assert.ok(session);
+    const baselineLoader = new sdk.DefaultResourceLoader({
+      cwd: temporaryDirectory, agentDir: temporaryDirectory, settingsManager: settings,
+      noExtensions: true, disabledBuiltinExtensions: ["mcp"], noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    });
+    await baselineLoader.reload();
+    assert.deepEqual(baselineLoader.getExtensions().errors, []);
+    assert.equal(baselineLoader.getExtensions().extensions.length, 0);
+    ({ session: baseline } = await sdk.createAgentSession({
+      cwd: temporaryDirectory, agentDir: temporaryDirectory, settingsManager: settings, modelRuntime: runtime,
+      model: runtime.getModel("existing_gateway", id), thinkingLevel: level,
+      resourceLoader: baselineLoader, sessionManager: sdk.SessionManager.inMemory(), tools: ["read"],
+    }));
+    assert.ok(baseline);
     await session.bindExtensions({
       mode: "tui", uiContext: testUI(session, {
         setStatus(key, value) { if (value === undefined) statuses.delete(key); else statuses.set(key, value); },
@@ -184,6 +210,7 @@ try {
       }
     });
     assert.equal(statuses.get("web-search"), "web: on");
+    assert.notEqual(session.systemPrompt, baseline.systemPrompt, "Enabled search must contribute its tool guidance");
     await session.prompt(`MAIN_HISTORY_ONLY ${"unrelated ".repeat(150000)} Run the fixture.`);
     const messages = session.sessionManager.getBranch().filter((entry) => entry.type === "message").map((entry) => entry.message);
     const result = messages.filter((item) => item.role === "toolResult").find((item) => item.toolName === "web_run");
@@ -206,6 +233,7 @@ try {
     assert.equal(statuses.get("web-search"), "web: off");
     assert.ok(!session.getActiveToolNames().includes("web_run"));
     await session.prompt("Run without web search.");
+    assertDisabledMatchesBaseline(session, baseline);
     assert.equal(mainIndex, 3);
     assert.equal(countChecks, 1);
     assert.equal(generationCount, 1);
@@ -213,6 +241,8 @@ try {
     const unsupportedModel = runtime.getModel("existing_gateway", "unsupported");
     assert.ok(unsupportedModel);
     await session.setModel(unsupportedModel);
+    await baseline.setModel(unsupportedModel);
+    assertDisabledMatchesBaseline(session, baseline);
     assert.equal(statuses.get("web-search"), "web: unavailable");
     assert.ok(!session.getActiveToolNames().includes("web_run"));
     const supportedModel = runtime.getModel("existing_gateway", id);
@@ -226,8 +256,10 @@ try {
     await runner.emit({ type: "session_shutdown", reason: "quit" });
     session.dispose();
     session = undefined;
+    baseline.dispose();
+    baseline = undefined;
     assert.equal(statuses.has("web-search"), false);
-    console.log(`PASS: ${id}; search reasoning low, main reasoning ${level}, isolated context, budget, usage, read, and controls`);
+    console.log(`PASS: ${id}; search reasoning low, main reasoning ${level}, isolated context, budget, usage, read, controls, and disabled-state baseline equivalence`);
   }
 
   phase = "checking installed Powerline and tool renderers";
@@ -264,6 +296,19 @@ try {
     content: [{ type: "text", text: "### Latest quotes\n\n| Stock | Price | Timestamp |\n| --- | --- | --- |\n".repeat(20) }],
     details: { ...savedResult.details, status: "done", elapsedMs: 61600 },
   };
+  const unannotatedResult: SearchResult = {
+    content: [{ type: "text", text: "A reported quote. [Quote page](https://example.com/quote)" }],
+    details: { ...savedResult.details, status: "done", sources: [], elapsedMs: 11896 },
+  };
+  const renderCases: { result: SearchResult; label: string; isPartial: boolean }[] = [
+    { result: longResult, label: "Searched", isPartial: false },
+    { result: unannotatedResult, label: "Searched", isPartial: false },
+    { result: { ...longResult, isError: true, details: { ...longResult.details, status: "error", error: longQuery } }, label: "Failed", isPartial: false },
+    { result: { ...longResult, isError: true, details: { ...longResult.details, status: "cancelled", error: longQuery } }, label: "Cancelled", isPartial: false },
+  ];
+  for (const [phase, label] of [["Checking input budget", "Checking"], ["Searching the web", "Searching"], ["Preparing findings", "Preparing"]]) {
+    renderCases.push({ result: { ...longResult, details: { ...longResult.details, status: "running", phase } }, label, isPartial: true });
+  }
   try {
     for (const colorMode of ["truecolor", "256color"] as const) {
       const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci_dark.json"), colorMode);
@@ -284,16 +329,16 @@ try {
           const callLines = call.render(width);
           assert.equal(callLines.length, 1);
           assert.equal(stripVTControlCharacters(callLines[0]).trim(), "web.run");
-          for (const result of [
-            longResult,
-            ...updates,
-            { ...longResult, isError: true, details: { ...longResult.details, status: "error", error: longQuery } },
-            { ...longResult, isError: true, details: { ...longResult.details, status: "cancelled", error: longQuery } },
-          ] satisfies SearchResult[]) {
-            const component = renderers.renderResult(result, { expanded: false, isPartial: result.details.status === "running" }, theme, resultContext);
+          for (const { result, label, isPartial } of renderCases) {
+            const component = renderers.renderResult(result, { expanded: false, isPartial }, theme, resultContext);
             const lines = [...callLines, ...component.render(width)];
             assert.equal(lines.length, 2, "Collapsed searches must use only a label and one status line");
             assert.ok(lines.every((line) => tui.visibleWidth(line) <= width));
+            assert.doesNotMatch(stripVTControlCharacters(lines[1]), /\d+ sources?/u,
+              "Completion status must not depend on citation metadata");
+            if (width >= 24) {
+              assert.equal(stripVTControlCharacters(lines[1]), `${label} · ${(result.details.elapsedMs / 1000).toFixed(1)}s`);
+            }
             assert.doesNotMatch(stripVTControlCharacters(lines.join("\n")), /\.\.\.|…|MSFT|Timestamp|stockanalysis|###|\|/u,
               "Collapsed searches must not show queries, result previews, domains, or truncation marks");
           }
@@ -320,6 +365,12 @@ try {
               assert.equal(tool.render(width).map(stripVTControlCharacters).filter((line: string) => line.trim()).length, 2);
             }
           }
+          if (width === 120) {
+            const plainLinks = renderers.renderResult(unannotatedResult, { expanded: true, isPartial: false }, theme, resultContext).render(width).join("\n");
+            assert.match(plainLinks, /Quote page/u);
+            assert.match(plainLinks, /https:\/\/example.com\/quote/u, "Unannotated answer links must remain visible when expanded");
+            assert.deepEqual(unannotatedResult.details.sources, [], "Rendering must not promote answer links to structured citations");
+          }
           for (const expanded of [true, false]) {
             const result = renderers.renderResult(savedResult, { expanded, isPartial: false }, theme, resultContext);
             const lines = result.render(width);
@@ -338,8 +389,9 @@ try {
     assert.ok(updates.some((result) => result.details.phase === "Preparing findings"));
     await writeFile(join(temporaryDirectory, "render-review.txt"), [
       ...renderers.renderCall({ query: "Node.js official release" }, themeApi.theme, { expanded: false }).render(100),
-      ...renderers.renderResult(savedResult, { expanded: false, isPartial: false }, themeApi.theme, resultContext).render(100),
-      "", "Expanded:", ...renderers.renderResult(savedResult, { expanded: true, isPartial: false }, themeApi.theme, resultContext).render(100),
+      ...renderers.renderResult(unannotatedResult, { expanded: false, isPartial: false }, themeApi.theme, resultContext).render(100),
+      "", "Unannotated result expanded:", ...renderers.renderResult(unannotatedResult, { expanded: true, isPartial: false }, themeApi.theme, resultContext).render(100),
+      "", "Annotated result expanded:", ...renderers.renderResult(savedResult, { expanded: true, isPartial: false }, themeApi.theme, resultContext).render(100),
     ].join("\n"));
     console.log("RENDER REVIEW:\n" + (await readFile(join(temporaryDirectory, "render-review.txt"), "utf8")).replace(/\u001b\[[0-9;]*m/gu, ""));
   } finally {
@@ -351,6 +403,7 @@ try {
   clearInterval(heartbeat);
   globalThis.fetch = originalFetch;
   try {
+    baseline?.dispose();
     if (session) {
       await session.abort();
       session.dispose();

@@ -40,10 +40,9 @@ export function createSearchRenderers({ Text, Markdown, Container, truncateToWid
       const details = result.details;
       const elapsed = `${((details?.elapsedMs ?? renderContext?.durationMs ?? 0) / 1000).toFixed(1)}s`;
       const failed = renderContext?.isError || result.isError || ["error", "cancelled"].includes(details?.status ?? "");
-      const sourceCount = details?.sources?.length ?? 0;
       const label = isPartial ? PHASE_LABELS[details?.phase ?? ""] ?? "Searching"
         : failed ? details?.status === "cancelled" ? "Cancelled" : "Failed"
-          : details ? `${sourceCount} source${sourceCount === 1 ? "" : "s"}` : "Done";
+          : details ? "Searched" : "Done";
       const color = isPartial ? "warning" : failed ? "error" : "success";
       const summary = {
         render(width: number) {
