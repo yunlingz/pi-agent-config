@@ -37,6 +37,17 @@
 !/extensions/vcc-recall-safe/request.mjs
 !/extensions/vcc-recall-safe/request.test.mjs
 !/extensions/vcc-recall-safe/README.md
+!/extensions/web-search/
+!/extensions/web-search/index.ts
+!/extensions/web-search/types.ts
+!/extensions/web-search/citations.ts
+!/extensions/web-search/search-request.ts
+!/extensions/web-search/render.ts
+!/extensions/web-search/web-search.ts
+!/extensions/web-search/web-search.test.ts
+!/extensions/web-search/verify-integration.ts
+!/extensions/web-search/verify-live.ts
+!/extensions/web-search/README.md
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
 !/themes/

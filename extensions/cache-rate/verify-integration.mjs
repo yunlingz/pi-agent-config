@@ -143,7 +143,11 @@ try {
   assert.deepEqual(config.invalidDisabledSegments, []);
   const preset = presets.getPreset(config.preset);
   const layout = configApi.mergeSegmentsWithCustomItems(preset, config.customItems, config);
-  assert.deepEqual(layout.leftSegments, preset.leftSegments.map((id) => id === "cache_read" ? "custom:cache_rate" : id));
+  const expectedLeft = preset.leftSegments.flatMap((id) => {
+    if (id === "thinking") return [id, "custom:web_search"];
+    return [id === "cache_read" ? "custom:cache_rate" : id];
+  });
+  assert.deepEqual(layout.leftSegments, expectedLeft);
   assert.deepEqual(layout.rightSegments, preset.rightSegments);
   assert.deepEqual(layout.secondarySegments, preset.secondarySegments);
   assert.ok(config.disabledSegments.includes("cache_read"));

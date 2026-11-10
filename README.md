@@ -61,7 +61,9 @@ The local [session-history extension](extensions/session-history/README.md) rest
 
 The local [cache-rate item](extensions/cache-rate/README.md) replaces Powerline's native cache percentage through its supported custom-status API. It includes cache writes in the total input denominator, displays one decimal place, and preserves the existing cache slot without patching installed packages.
 
-Autoformat and web-search extensions are not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
+The local [web-search extension](extensions/web-search/README.md) registers `web_run`, displayed as `web.run`, for Astra, Sol, and Terra through `existing_gateway`. Each search uses an independent Responses request with the main session's model. Every supported model uses low effort for search; main-session effort stays unchanged. It sends selected context, not the full conversation, and enforces 64k gateway-counted input and 32k generation limits. `/web-search on|off|status` controls availability. Powerline shows `web: on`, `web: off`, or `web: unavailable`. The extension uses TypeScript without a build step or MCP.
+
+Autoformat is not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
 
 ## Upgrade Pi and extensions
 

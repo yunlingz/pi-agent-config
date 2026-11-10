@@ -54,12 +54,19 @@
         "statusKey": "cache-rate",
         "position": "left",
         "color": "muted"
+      },
+      {
+        "id": "web_search",
+        "statusKey": "web-search",
+        "position": "left",
+        "color": "muted"
       }
     ],
     "layout": {
       "left": [
         "model",
         "thinking",
+        "custom:web_search",
         "shell_mode",
         "path",
         "git",
