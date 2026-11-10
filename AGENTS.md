@@ -294,6 +294,10 @@ Review complex or high-risk content more closely. Do not add routine model reque
     - Preserve requested deliverables.
     - Check that the owned directory is absent before reporting cleanup success.
     - Report cleanup that could not be completed.
+- **Reduce npm supply-chain risk**
+  - Use only `https://packagefeedproxy.microsoft.io/npm/` for temporary npm dependencies, including helper packages, checking tools, and declarations.
+  - Pass `--registry=https://packagefeedproxy.microsoft.io/npm/` explicitly to `npm install`, `npm ci`, `npm exec`, and `npx`.
+  - If this registry is unavailable or rejects a package, report the blocker without switching registries.
 
 ## Keep reusable instructions concise and scoped
 
