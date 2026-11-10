@@ -1,15 +1,19 @@
 {
   "theme": "ci_dark",
   "defaultProvider": "existing_gateway",
-  "defaultModel": "gpt-latest",
+  "defaultModel": "gpt-6-astra",
   "transport": "sse",
   "enabledModels": [
-    "existing_gateway/gpt-latest"
+    "existing_gateway/gpt-6.1-sol",
+    "existing_gateway/gpt-6-astra"
   ],
-  "defaultThinkingLevel": "max",
+  "defaultThinkingLevel": "high",
   "compaction": {
     "modelOverrides": {
-      "existing_gateway/gpt-latest": {
+      "existing_gateway/gpt-6-astra": {
+        "reserveTokens": 192000
+      },
+      "existing_gateway/gpt-6.1-sol": {
         "reserveTokens": 192000
       }
     }

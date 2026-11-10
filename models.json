@@ -6,15 +6,34 @@
       "authHeader": true,
       "models": [
         {
-          "id": "gpt-latest",
+          "id": "gpt-6-astra",
           "reasoning": true,
           "thinkingLevelMap": {
-            "off": null,
-            "minimal": null,
-            "low": null,
-            "medium": null,
-            "high": null,
-            "xhigh": null,
+            "off": "high",
+            "minimal": "high",
+            "low": "high",
+            "medium": "high",
+            "high": "high",
+            "xhigh": "high",
+            "max": "high"
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        },
+        {
+          "id": "gpt-6.1-sol",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": "max",
+            "minimal": "max",
+            "low": "max",
+            "medium": "max",
+            "high": "max",
+            "xhigh": "max",
             "max": "max"
           },
           "input": [
