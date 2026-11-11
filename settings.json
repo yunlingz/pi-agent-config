@@ -49,14 +49,14 @@
     ],
     "customItems": [
       {
-        "id": "cache_rate",
-        "statusKey": "cache-rate",
+        "id": "web_search",
+        "statusKey": "web-search",
         "position": "left",
         "color": "muted"
       },
       {
-        "id": "web_search",
-        "statusKey": "web-search",
+        "id": "token_usage",
+        "statusKey": "token-usage",
         "position": "left",
         "color": "muted"
       }
@@ -71,8 +71,7 @@
         "git",
         "queue",
         "context_pct",
-        "custom:cache_rate",
-        "cost"
+        "custom:token_usage"
       ]
     },
     "queue": {

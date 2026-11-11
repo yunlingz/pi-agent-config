@@ -60,7 +60,7 @@ Native compaction makes model requests and can incur latency and cost.
 Work guards, cancellation handling, and failure-before-quit safeguards remain active.
 Pi's native transcript view handles compacted sessions; saved session files remain intact.
 
-The local [cache-rate item](extensions/cache-rate/README.md) replaces Powerline's native cache percentage through its supported custom-status API. It includes cache writes in the total input denominator, displays one decimal place, and preserves the existing cache slot without patching installed packages.
+The local [token-usage item](extensions/token-usage/README.md) replaces the separate cost and cache displays. It reports `in`, `cr`, `cw`, `out`, and the input-token cache percentage in one item. Counts start after the latest successful manual or automatic compaction and survive reload and resume. The four raw fields remain separate; this item does not use native `token_in` or `token_out`.
 
 The local [web-search extension](extensions/web-search/README.md) registers and displays `web_run`.
 [`web-search.json`](web-search.json) selects one search provider and its model allowlist; [`web-search.schema.json`](web-search.schema.json) supplies editor and runtime validation.
