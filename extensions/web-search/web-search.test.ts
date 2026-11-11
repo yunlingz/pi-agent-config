@@ -3,6 +3,9 @@ import test from "node:test";
 import { citationSource, cleanText, renderCitations } from "./citations.ts";
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, ModelsSimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { SearchParameters, SearchResult } from "./types.ts";
+import type { SearchConfiguration } from "./config.ts";
+import { responsesWebSearch, selectSearchProvider } from "./providers.ts";
+import { looksLikeWebRetrieval } from "./verification-fixtures.ts";
 import { createBudgetedFetch, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, runSearch, searchPayload, type SearchRegistry } from "./search-request.ts";
 import { registerWebSearch, SEARCH_GUIDELINES, STATE_TYPE, TOOL_NAME, type RegisteredSearchTool, type SearchContext, type SearchEntry, type SearchExtension, type SearchStartEvent } from "./web-search.ts";
 
@@ -39,7 +42,9 @@ const TEXT = "The release is available.";
 const CITATION = { type: "url_citation", title: "Release notes", url: "https://example.com/releases", start_index: 0, end_index: TEXT.length };
 const USAGE = { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120, cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 } };
 
-function harness({ id = MODELS[0][0], mode = "tui", active = true }: { id?: string; mode?: SearchContext["mode"]; active?: boolean } = {}) {
+function harness({ id = MODELS[0][0], mode = "tui", active = true, configuration }: {
+  id?: string; mode?: SearchContext["mode"]; active?: boolean; configuration?: SearchConfiguration;
+} = {}) {
   const handlers = new Map<string, (event: SearchStartEvent, ctx: SearchContext) => void>();
   const commands = new Map<string, Parameters<SearchExtension["registerCommand"]>[1]>();
   const state: {
@@ -69,7 +74,10 @@ function harness({ id = MODELS[0][0], mode = "tui", active = true }: { id?: stri
       notify(text, level) { state.notifications.push({ text, level }); },
     },
   };
-  registerWebSearch(pi, { parameters: PARAMETERS });
+  registerWebSearch(pi, { parameters: PARAMETERS }, configuration ?? {
+    status: "valid", configPath: "fixture/web-search.json",
+    provider: responsesWebSearch({ modelAllowList: MODELS.map(([id]) => `existing_gateway/${id}`) }),
+  });
   const tool = state.tools.get(TOOL_NAME);
   const command = commands.get("web-search");
   assert.ok(tool);
@@ -188,11 +196,12 @@ for (const [id, thinkingLevel] of MODELS) {
 test("register a normal web_run tool without main provider hooks", () => {
   const h = harness();
   assert.equal(h.tool.name, "web_run");
-  assert.equal(h.tool.label, "web.run");
+  assert.equal(h.tool.label, "web_run");
   assert.equal(h.tool.namespace?.name, "web");
   assert.equal(h.handlers.has("before_provider_request"), false);
   assert.equal(h.handlers.has("provider_stream_event"), false);
   assert.equal(h.handlers.has("message_end"), false);
+  assert.equal(h.handlers.has("tool_call"), false);
   assert.equal(h.tool.annotations?.readOnlyHint, true);
 });
 
@@ -253,6 +262,82 @@ test("unsupported providers, APIs, and models show unavailable and cannot be ena
     assert.equal(result.isError, true);
     assert.match(firstText(result), /unavailable/u);
   }
+});
+
+test("Responses eligibility comes only from exact configured identifiers and the API contract", () => {
+  const model = { ...modelFixture("future/model"), provider: "another_gateway" };
+  const provider = responsesWebSearch({ modelAllowList: ["another_gateway/future/model"] });
+  assert.equal(provider.supports(model), true);
+  assert.equal(provider.supports({ ...model, id: "future" }), false);
+  assert.equal(provider.supports({ ...model, provider: "Another_gateway" }), false);
+  assert.equal(provider.supports({ ...model, api: "openai-completions" }), false);
+  assert.equal(provider.supports(undefined), false);
+  assert.equal(responsesWebSearch({ modelAllowList: [] }).supports(model), false);
+  assert.equal(responsesWebSearch({ modelAllowList: ["another_gateway/*"] }).supports(model), false);
+});
+
+test("provider selection returns the configured implementation without model defaults", () => {
+  const provider = selectSearchProvider({
+    $schema: "./web-search.schema.json", enableProvider: "responsesWebSearch",
+    providers: { responsesWebSearch: { modelAllowList: [] } },
+  });
+  assert.equal(provider.name, "responsesWebSearch");
+  assert.equal(provider.supports(modelFixture(MODELS[0][0])), false);
+});
+
+test("invalid settings override off and unavailable states without starting requests", async () => {
+  const h = harness({ configuration: {
+    status: "invalid", configPath: "fixture/web-search.json",
+    error: "fixture/web-search.json: /enableProvider must be string",
+  } });
+  h.emit("session_start");
+  assert.equal(h.status(), "web: invalid setting");
+  assert.deepEqual(h.state.active, ["read"]);
+  assert.equal(h.state.notifications.length, 1);
+  h.emit("session_tree");
+  h.emit("before_agent_start");
+  assert.equal(h.state.notifications.length, 1, "Do not repeat automatic diagnostics");
+  await h.command("off");
+  assert.equal(h.status(), "web: invalid setting");
+  h.ctx.model.id = "unsupported";
+  h.emit("model_select");
+  await h.command("on");
+  assert.equal(h.status(), "web: invalid setting");
+  assert.equal(h.state.branch.length, 1, "An invalid setting must not allow enabling search");
+  const result = await h.tool.execute("call", { query: "release" }, undefined, undefined, h.ctx);
+  assert.equal(result.isError, true);
+  assert.match(firstText(result), /invalid settings/u);
+  await h.command("status");
+  assert.match(h.state.notifications.at(-1)?.text ?? "", /\/enableProvider/u);
+});
+
+test("shared controls dispatch only to the selected provider and use its description", async () => {
+  let requests = 0;
+  const h = harness({ configuration: {
+    status: "valid", configPath: "fixture/web-search.json",
+    provider: {
+      name: "fixtureSearch", description: "Search using the fixture provider.", supports: () => true,
+      async execute(options) {
+        requests++;
+        assert.equal(options.query, "fixture query");
+        assert.equal(options.signal.aborted, false);
+        return { content: [{ type: "text", text: "Fixture findings" }], details: { status: "done", sources: [], elapsedMs: 1 } };
+      },
+    },
+  } });
+  h.ctx.model.api = "openai-completions";
+  h.emit("session_start");
+  assert.equal(h.status(), "web: on");
+  assert.match(h.tool.description, /fixture provider/u);
+  assert.doesNotMatch(h.tool.description, /low reasoning|64,000/u);
+  const result = await h.tool.execute("call", { query: "fixture query" }, undefined, undefined, h.ctx);
+  assert.equal(firstText(result), "Fixture findings");
+  assert.equal(requests, 1);
+  await h.command("off");
+  await h.tool.execute("call", { query: "fixture query" }, undefined, undefined, h.ctx);
+  assert.equal(requests, 1);
+  await h.command("status");
+  assert.match(h.state.notifications.at(-1)?.text ?? "", /Provider: fixtureSearch/u);
 });
 
 test("model switching restores supported search while preserving the off preference", async () => {
@@ -332,12 +417,34 @@ test("empty queries fail before accessing the model runtime", async () => {
   assert.equal(result.isError, true);
 });
 
+test("live smoke checks distinguish common web fetches from useful local shell work", () => {
+  for (const command of ["curl https://example.com", "wget https://example.com", "Invoke-WebRequest https://example.com", "node -e 'fetch(url)'", "node -e 'https.get(url)'", "python -c 'import urllib.request'"]) {
+    assert.equal(looksLikeWebRetrieval(command), true, command);
+  }
+  for (const command of [undefined, "node --version", "node -p 'new Date().toISOString()'", "git status --short", "date -u +%Y-%m-%d"]) {
+    assert.equal(looksLikeWebRetrieval(command), false, String(command));
+  }
+});
+
+test("search activation never removes other tools", async () => {
+  for (const invalid of [false, true]) {
+    const h = harness(invalid ? { configuration: { status: "invalid", configPath: "fixture/web-search.json", error: "Invalid fixture" } } : {});
+    h.state.active.push("bash", "write");
+    h.emit("session_start");
+    await h.command("off");
+    h.ctx.model.id = "unsupported";
+    h.emit("model_select");
+    assert.deepEqual(h.state.active, ["read", "bash", "write"]);
+    assert.equal(h.handlers.has("tool_call"), false, "The plugin must not intercept or block bash calls");
+  }
+});
+
 test("independent payload forces native search and removes conversation attachment", () => {
   const original = { model: "model", input: [], reasoning: { effort: "xhigh" }, previous_response_id: "old", conversation: "old", tools: [{ type: "function", name: "read" }] };
   const copy = structuredClone(original);
   const result = searchPayload(original);
   assert.deepEqual(result.tools, [{ type: "web_search" }]);
-  assert.deepEqual(result.tool_choice, { type: "web_search" });
+  assert.equal(result.tool_choice, "required");
   assert.equal(result.max_output_tokens, 32000);
   assert.equal(result.truncation, "disabled");
   assert.equal(result.previous_response_id, undefined);
@@ -356,6 +463,7 @@ test("the input-token check includes the actual input, instructions, tools, and 
   assert.equal(h.calls[0].body.instructions, h.payload.instructions);
   assert.deepEqual(h.calls[0].body.tools, h.payload.tools);
   assert.deepEqual(h.calls[0].body.reasoning, h.payload.reasoning);
+  assert.equal(h.calls[0].body.tool_choice, "required");
   assert.equal(h.calls[0].body.stream, undefined);
   assert.deepEqual(h.calls[1].body, h.payload);
   assert.deepEqual(h.counts, [64000]);

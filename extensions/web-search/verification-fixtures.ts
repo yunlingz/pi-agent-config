@@ -1,5 +1,16 @@
 import type { CitationAnnotation } from "./types.ts";
 
+// This smoke check recognizes common retrieval commands. It is not a shell parser or a runtime restriction.
+export function looksLikeWebRetrieval(command: unknown): boolean {
+  if (typeof command !== "string") return false;
+  return [
+    /\b(?:curl|wget|Invoke-WebRequest|Invoke-RestMethod)\b/iu,
+    /\bfetch\s*\(/u,
+    /\b(?:https?|http2)\s*\.\s*(?:get|request|connect)\s*\(/u,
+    /\b(?:urllib|requests|httpx)\b/u,
+  ].some((pattern) => pattern.test(command));
+}
+
 /** Fields read from OpenAI Responses requests by the verification transports. */
 export interface VerificationPayload {
   model: string;
@@ -15,6 +26,8 @@ export type VerificationAudit = {
   type: "search";
   model: string;
   reasoning: VerificationPayload["reasoning"];
+  tools: VerificationPayload["tools"];
+  toolChoice: unknown;
   configurationUpdates: VerificationPayload["input"];
   count: boolean;
 } | {

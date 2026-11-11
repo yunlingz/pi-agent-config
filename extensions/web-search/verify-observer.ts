@@ -18,6 +18,7 @@ export function createObserver(auditPath: string): (pi: ExtensionAPI) => void {
         if (payload.tools?.some((tool) => tool.type === "web_search")) {
           record({
             type: "search", model: payload.model, reasoning: payload.reasoning,
+            tools: payload.tools, toolChoice: payload.tool_choice,
             configurationUpdates: payload.input.filter((item) => item.type === "configuration_update"),
             count: request.url.endsWith("/input_tokens"),
           });

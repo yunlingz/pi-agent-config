@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -9,7 +10,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { JsonAgentSessionEvent, SessionHeader } from "@earendil-works/pi-coding-agent";
 import { parseTrustedJson } from "../../scripts/verification-data.ts";
 import type { SearchDetails } from "./types.ts";
-import type { VerificationAudit } from "./verification-fixtures.ts";
+import { looksLikeWebRetrieval, type VerificationAudit } from "./verification-fixtures.ts";
 
 const [packageArgument, modelId] = process.argv.slice(2);
 const levels: Record<string, string> = { "gpt-6-astra": "high", "gpt-6.1-sol": "xhigh", "gpt-6.1-terra": "max" };
@@ -17,9 +18,6 @@ assert.ok(packageArgument && modelId && levels[modelId], "Usage: node verify-liv
 const packageDirectory = resolve(packageArgument);
 const extensionDirectory = dirname(fileURLToPath(import.meta.url));
 const agentDirectory = resolve(extensionDirectory, "../..");
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-web-search-live-"));
-const observerPath = join(temporaryDirectory, "observer.ts");
-const auditPath = join(temporaryDirectory, "audit.jsonl");
 const marker = "WEB_SEARCH_FOLLOW_UP_OK";
 let child: ChildProcess | undefined;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -31,7 +29,10 @@ let errorBytes = 0;
 let invalidRecords = 0;
 const messages: AgentMessage[] = [];
 
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-web-search-live-"));
 try {
+  const observerPath = join(temporaryDirectory, "observer.ts");
+  const auditPath = join(temporaryDirectory, "audit.jsonl");
   await writeFile(join(temporaryDirectory, "marker.txt"), `${marker}\n`);
   await mkdir(join(temporaryDirectory, ".pi"));
   await writeFile(join(temporaryDirectory, ".pi/settings.json"), JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }));
@@ -47,11 +48,11 @@ export default createObserver(${JSON.stringify(auditPath)});
     "--append-system-prompt", "Keep answers brief. Do not change files. Use Node.js for any scripts. Do not use MCP.",
     "Transform this supplied text to uppercase: stable_test_ok. Reply with only the transformed text.",
     "What is the current Node.js LTS version? Include an official source link.",
-    "Shorten that answer to one sentence.",
+    "Shorten that answer to one sentence using the same findings, without another lookup. Then run node --version with bash and report its output.",
     "/web-search off",
     "Do not search. Read marker.txt with read. Return its exact marker and one source URL from your previous answer. Do not change files.",
   ];
-  console.log(`START: ${modelId}; no-search task, model-selected search, evidence reuse, off control, and read follow-up; 240-second limit`);
+  console.log(`START: ${modelId}; no-search task, model-selected search, evidence reuse, useful local bash, off control, and read follow-up; 240-second limit`);
   const processChild = spawn(process.execPath, args, {
     cwd: temporaryDirectory, shell: false, windowsHide: true,
     env: { ...process.env, PI_CODING_AGENT_DIR: agentDirectory, PI_OFFLINE: "1", PI_TELEMETRY: "0" },
@@ -68,7 +69,18 @@ export default createObserver(${JSON.stringify(auditPath)});
       if (!line.trim()) continue;
       try {
         const event = parseTrustedJson<JsonAgentSessionEvent | SessionHeader>(line);
-        if (event.type === "message_end") messages.push(event.message);
+        if (event.type === "message_end") {
+          messages.push(event.message);
+          if (event.message.role === "assistant") {
+            for (const block of event.message.content) {
+              if (block.type !== "toolCall" || block.name !== "bash") continue;
+              const command = block.arguments.command;
+              if (typeof command === "string") {
+                console.log(`SHELL AUDIT: explicitRetrieval=${looksLikeWebRetrieval(command)}; requestedLocalTask=${command.trim() === "node --version"}`);
+              }
+            }
+          }
+        }
         if (event.type === "tool_execution_end") console.log(`PROGRESS: ${modelId}; ${event.toolName} ${event.isError ? "failed" : "finished"}`);
       } catch {
         invalidRecords++;
@@ -98,6 +110,8 @@ export default createObserver(${JSON.stringify(auditPath)});
   for (const request of searchRequests) {
     assert.equal(request.model, modelId);
     assert.deepEqual(request.reasoning, { effort: "low" });
+    assert.deepEqual(request.tools, [{ type: "web_search" }]);
+    assert.equal(request.toolChoice, "required");
     assert.deepEqual(request.configurationUpdates, []);
   }
   assert.ok(audit.length >= 6, "Require the stable answer, research call/follow-up, evidence reuse, and read call/follow-up");
@@ -110,8 +124,18 @@ export default createObserver(${JSON.stringify(auditPath)});
   assert.ok(audit[0].names?.includes("web_run"));
   assert.equal(audit[0].hasSearchGuidance, true, "The first model request must contain all registered search guidelines");
   assert.ok(audit[0].names?.includes("bash"), "Shell access must be available to test tool selection");
-  assert.ok(!messages.some((message) => message.role === "toolResult" && message.toolName === "bash"),
-    "A routine question with sufficient search findings must not trigger shell retrieval");
+  const shellCalls = messages.filter((message) => message.role === "assistant")
+    .flatMap((message) => message.content.filter((block) => block.type === "toolCall"))
+    .filter((call) => call.name === "bash");
+  const shellResults = messages.filter((message) => message.role === "toolResult")
+    .filter((message) => message.toolName === "bash");
+  assert.equal(shellCalls.length, shellResults.length, "Every shell result must have a captured call");
+  assert.ok(shellCalls.every((call) => !looksLikeWebRetrieval(call.arguments.command)),
+    "This supplied-text, research-reuse, and local-work fixture must not trigger an additional explicit web fetch");
+  const localShellCall = shellCalls.find((call) => call.arguments.command === "node --version");
+  assert.ok(localShellCall, "Useful local bash work must remain available after search");
+  assert.ok(shellResults.some((result) => result.toolCallId === localShellCall.id && !result.isError),
+    "The requested local bash command must succeed");
   const lastAudit = audit.at(-1);
   assert.ok(lastAudit?.names);
   assert.ok(!lastAudit.names.includes("web_run"), "Off removes the main tool declaration");
@@ -143,11 +167,16 @@ export default createObserver(${JSON.stringify(auditPath)});
   assert.match(finalText, new RegExp(marker));
   assert.match(finalText, /https?:\/\//u);
   passed = true;
-  console.log(`PASS: ${modelId}; main effort ${levels[modelId]}, search effort low, ${search.usage.reasoning} reasoning tokens, ${(search.details.elapsedMs / 1000).toFixed(1)}s search, ${search.details.inputTokens} counted input tokens, ${search.details.sources.length} sources; model-selected search, evidence reuse without bash, no-search task, and off control passed`);
+  console.log(`PASS: ${modelId}; main effort ${levels[modelId]}, search effort low, ${search.usage.reasoning} reasoning tokens, ${(search.details.elapsedMs / 1000).toFixed(1)}s search, ${search.details.inputTokens} counted input tokens, ${search.details.sources.length} sources; model-selected search, evidence reuse without a recognized extra web fetch, useful local bash, no-search task, and off control passed`);
 } finally {
   clearInterval(heartbeat);
   clearTimeout(timeout);
-  if (child && child.exitCode === null && child.signalCode === null) child.kill();
+  if (child && child.exitCode === null && child.signalCode === null) {
+    const closed = new Promise<void>((resolveClose) => child?.once("close", () => resolveClose()));
+    child.kill();
+    await closed;
+  }
   await rm(temporaryDirectory, { recursive: true, force: true, maxRetries: 3 });
+  assert.equal(existsSync(temporaryDirectory), false, "Owned live-test directory must be absent");
   process.stderr.write(`${passed ? "SUCCESS" : "FAILED"}: ${modelId}; temporary files removed\n`);
 }

@@ -23,7 +23,7 @@ export function createSearchRenderers({ Text, Markdown, Container, truncateToWid
     renderCall(args, theme, context) {
       const title = {
         render(width: number) {
-          return [truncateToWidth(theme.fg("toolTitle", theme.bold("web.run")), width, "")];
+          return [truncateToWidth(theme.fg("toolTitle", theme.bold("web_run")), width, "")];
         },
         invalidate() {},
       };

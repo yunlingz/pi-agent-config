@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Web search configuration",
+  "description": "Configure search providers and select exactly one provider.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "providers",
+    "enableProvider"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "./web-search.schema.json",
+      "description": "Use the companion schema for editor validation and completion."
+    },
+    "providers": {
+      "type": "object",
+      "description": "Provider-specific settings. Only the selected provider can execute searches.",
+      "additionalProperties": false,
+      "required": [
+        "responsesWebSearch"
+      ],
+      "properties": {
+        "responsesWebSearch": {
+          "$ref": "#/$defs/responsesWebSearchSettings"
+        }
+      }
+    },
+    "enableProvider": {
+      "type": "string",
+      "description": "Select exactly one configured search provider.",
+      "enum": [
+        "responsesWebSearch"
+      ]
+    }
+  },
+  "$defs": {
+    "responsesWebSearchSettings": {
+      "type": "object",
+      "description": "Settings for independent Responses API web search.",
+      "additionalProperties": false,
+      "required": [
+        "modelAllowList"
+      ],
+      "properties": {
+        "modelAllowList": {
+          "type": "array",
+          "description": "Allow exact provider/model identifiers. An empty list permits no models.",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "A full provider/model identifier without whitespace.",
+            "pattern": "^[^/]+/.+$",
+            "not": {
+              "pattern": "\\s"
+            }
+          }
+        }
+      }
+    }
+  }
+}

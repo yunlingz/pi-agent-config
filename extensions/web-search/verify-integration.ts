@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -12,6 +13,7 @@ import { readJson, readPackageInfo } from "../../scripts/verification-data.ts";
 import type { CitationAnnotation, SearchDetails, SearchResult } from "./types.ts";
 import type { FixtureEvent, FixtureMessage, FixtureOutput, FixtureToolCall, VerificationPayload } from "./verification-fixtures.ts";
 import { createSearchRenderers } from "./render.ts";
+import { loadSearchConfiguration, type SearchSettings } from "./config.ts";
 
 const packageArgument = process.argv[2];
 assert.ok(packageArgument, "Usage: node verify-integration.ts <installed-pi-package-directory>");
@@ -21,10 +23,14 @@ const agentDirectory = resolve(extensionDirectory, "../..");
 // The supplied directory is an installed Pi package; check its name before loading its API.
 const packageInfo = readPackageInfo(join(packageDirectory, "package.json"));
 assert.equal(packageInfo.name, "@earendil-works/pi-coding-agent");
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-web-search-integration-"));
 const require = createRequire(pathToFileURL(join(packageDirectory, "package.json")));
 const originalFetch = globalThis.fetch;
+const originalAgentDirectory = process.env.PI_CODING_AGENT_DIR;
 const modelLevels = [["gpt-6-astra", "high"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
+const modelCases = [
+  ...modelLevels.map(([id, level]) => ({ provider: "existing_gateway", id, level })),
+  { provider: "fixture_gateway", id: "future/model", level: "high" as const },
+];
 const statuses = new Map<string, string>();
 const updates: SearchResult[] = [];
 const errors: unknown[] = [];
@@ -38,9 +44,7 @@ let countChecks = 0;
 let totalGenerations = 0;
 let passed = false;
 let phase = "loading installed Pi";
-const heartbeat = setInterval(() => {
-  process.stderr.write(`[${new Date().toISOString()}] Web-search integration: ${phase}\n`);
-}, 20_000);
+let heartbeat: ReturnType<typeof setInterval> | undefined;
 
 function streamFixture(model: string, output: FixtureOutput[]): string {
   const responseId = `resp_fixture_${totalGenerations++}`;
@@ -94,7 +98,81 @@ function assertDisabledMatchesBaseline(actual: AgentSession, expected: AgentSess
   assert.equal(actual.thinkingLevel, expected.thinkingLevel);
 }
 
+async function verifyConfiguration(validate: typeof import("typebox/value").Errors, schemaText: string, settings: SearchSettings): Promise<void> {
+  const schemaPath = join(temporaryDirectory, "web-search.schema.json");
+  const configPath = join(temporaryDirectory, "web-search.json");
+  const providerSettings = settings.providers.responsesWebSearch;
+  const cases: { name: string; settings: unknown }[] = [
+    { name: "root type", settings: [] },
+    { name: "missing schema reference", settings: { providers: settings.providers, enableProvider: settings.enableProvider } },
+    { name: "remote schema reference", settings: { ...settings, $schema: "https://example.com/schema.json" } },
+    { name: "missing selector", settings: { $schema: settings.$schema, providers: settings.providers } },
+    { name: "multiple selectors", settings: { ...settings, enableProvider: ["responsesWebSearch", "futureSearch"] } },
+    { name: "unknown selector", settings: { ...settings, enableProvider: "futureSearch" } },
+    { name: "missing selected settings", settings: { ...settings, providers: {} } },
+    { name: "unknown provider", settings: { ...settings, providers: { ...settings.providers, futureSearch: {} } } },
+    { name: "unknown root field", settings: { ...settings, enabledProvider: settings.enableProvider } },
+    { name: "unknown provider field", settings: { ...settings, providers: { responsesWebSearch: { ...providerSettings, enabled: true } } } },
+    { name: "missing allowlist", settings: { ...settings, providers: { responsesWebSearch: {} } } },
+    { name: "allowlist type", settings: { ...settings, providers: { responsesWebSearch: { modelAllowList: "model" } } } },
+    { name: "duplicate model", settings: { ...settings, providers: { responsesWebSearch: { modelAllowList: ["fixture/model", "fixture/model"] } } } },
+  ];
+  for (const identifier of ["model", "/model", "provider/", "provider /model", "provider/model\n", "provider/ model", ""]) {
+    cases.push({ name: `invalid identifier ${JSON.stringify(identifier)}`, settings: {
+      ...settings, providers: { responsesWebSearch: { modelAllowList: [identifier] } },
+    } });
+  }
+  await writeFile(schemaPath, schemaText);
+  for (const fixture of cases) {
+    await writeFile(configPath, JSON.stringify(fixture.settings));
+    const result = await loadSearchConfiguration(temporaryDirectory, validate);
+    assert.equal(result.status, "invalid", fixture.name);
+    assert.ok(result.status === "invalid");
+    assert.ok(result.error.includes(configPath), fixture.name);
+    assert.match(result.error, /: \//u, "Schema errors must identify the failing property path");
+  }
+  for (const identifiers of [[], ["fixture_gateway/future/model"]]) {
+    await writeFile(configPath, JSON.stringify({ ...settings, providers: { responsesWebSearch: { modelAllowList: identifiers } } }));
+    assert.equal((await loadSearchConfiguration(temporaryDirectory, validate)).status, "valid");
+  }
+  await writeFile(configPath, JSON.stringify(settings));
+  await writeFile(schemaPath, schemaText.replace('"uniqueItems": true', '"uniqueItems": true, "maxItems": 0'));
+  assert.equal((await loadSearchConfiguration(temporaryDirectory, validate)).status, "invalid", "Runtime must read the companion schema, not a duplicate decoder");
+  const extendedSchema = schemaText.replace('"enum": [\n        "responsesWebSearch"\n      ]', '"enum": ["responsesWebSearch", "futureSearch"]');
+  assert.notEqual(extendedSchema, schemaText);
+  await writeFile(schemaPath, extendedSchema);
+  await writeFile(configPath, JSON.stringify({ ...settings, enableProvider: "futureSearch" }));
+  const unimplemented = await loadSearchConfiguration(temporaryDirectory, validate);
+  assert.ok(unimplemented.status === "invalid");
+  assert.match(unimplemented.error, /\/enableProvider.*unimplemented/u);
+  for (const schema of ["{", "null", "[]", '{"type":3}', "{}", '{"type":"object","$ref":"#/missing"}']) {
+    await writeFile(schemaPath, schema);
+    await writeFile(configPath, JSON.stringify(settings));
+    assert.equal((await loadSearchConfiguration(temporaryDirectory, validate)).status, "invalid", `Unusable schema: ${schema}`);
+  }
+  await writeFile(schemaPath, schemaText);
+  await writeFile(configPath, '{"private-setting-marker":');
+  const malformed = await loadSearchConfiguration(temporaryDirectory, validate);
+  assert.ok(malformed.status === "invalid");
+  assert.match(malformed.error, /Invalid JSON/u);
+  assert.doesNotMatch(malformed.error, /private-setting-marker/u);
+  for (const path of [configPath, schemaPath]) {
+    await rm(path);
+    assert.equal((await loadSearchConfiguration(temporaryDirectory, validate)).status, "invalid", "Missing files must not use defaults");
+    await mkdir(path);
+    assert.equal((await loadSearchConfiguration(temporaryDirectory, validate)).status, "invalid", "Unreadable files must not use defaults");
+    await rm(path, { recursive: true });
+    await writeFile(path, path === configPath ? JSON.stringify(settings) : schemaText);
+  }
+  console.log(`PASS: ${cases.length} invalid configuration cases; empty/custom allowlists; local schema authority; unimplemented provider; unusable, missing, unreadable, and malformed files`);
+}
+
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-web-search-integration-"));
 try {
+  process.env.PI_CODING_AGENT_DIR = temporaryDirectory;
+  heartbeat = setInterval(() => {
+    process.stderr.write(`[${new Date().toISOString()}] Web-search integration: ${phase}\n`);
+  }, 20_000);
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     assert.equal(new URL(request.url).origin, "http://127.0.0.1:1", "Only the local transport fixture is allowed");
@@ -107,7 +185,7 @@ try {
       assert.deepEqual(payload.reasoning, { effort: "low" }, "Every search must use low, even when the main model configuration restricts low");
       assert.deepEqual(efforts, [], "Search must not inherit a reasoning configuration update");
       assert.deepEqual(payload.tools, [{ type: "web_search" }]);
-      assert.deepEqual(payload.tool_choice, { type: "web_search" });
+      assert.equal(payload.tool_choice, "required");
       assert.equal(payload.truncation, "disabled");
       assert.doesNotMatch(JSON.stringify(payload.input), /MAIN_HISTORY_ONLY/u, "Main-session history must not enter the independent request");
       assert.match(JSON.stringify(payload.input), /SELECTED_CONTEXT/u);
@@ -145,23 +223,31 @@ try {
     assert.ok(index < 3, "Only planned requests may run");
     return new Response(streamFixture(currentModel, [message("Fixture complete.")]), { headers: { "content-type": "text/event-stream" } });
   };
+  const validator: typeof import("typebox/value") = await import(pathToFileURL(require.resolve("typebox/value")).href);
+  const schemaText = await readFile(join(agentDirectory, "web-search.schema.json"), "utf8");
+  const searchSettings = readJson<SearchSettings>(join(agentDirectory, "web-search.json"));
+  await verifyConfiguration(validator.Errors, schemaText, searchSettings);
+  searchSettings.providers.responsesWebSearch.modelAllowList.push("fixture_gateway/future/model");
+  await writeFile(join(temporaryDirectory, "web-search.json"), JSON.stringify(searchSettings));
   const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
   await writeFile(join(temporaryDirectory, "marker.txt"), "WEB_SEARCH_READ_OK\n");
   const runtime = await sdk.ModelRuntime.create({
     authPath: join(temporaryDirectory, "auth.json"), modelsPath: null,
     modelsStorePath: join(temporaryDirectory, "models-store.json"), allowModelNetwork: false, refreshOnCreate: false,
   });
-  runtime.registerProvider("existing_gateway", {
-    api: "openai-responses", baseUrl: "http://127.0.0.1:1", apiKey: "fixture-only",
-    models: [...modelLevels.map(([id, level]): ProviderModelConfig => ({
-      id, name: id, reasoning: true, input: ["text"], contextWindow: 1050000, maxTokens: 128000,
-      thinkingLevelMap: Object.fromEntries(["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((item) => [item, item === level ? level : null])),
-      cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
-    })), { id: "unsupported", name: "Unsupported fixture", reasoning: false, input: ["text"], contextWindow: 1000000, maxTokens: 32000,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
-  });
+  for (const provider of new Set(modelCases.map((fixture) => fixture.provider))) {
+    runtime.registerProvider(provider, {
+      api: "openai-responses", baseUrl: "http://127.0.0.1:1", apiKey: "fixture-only",
+      models: [...modelCases.filter((fixture) => fixture.provider === provider).map(({ id, level }): ProviderModelConfig => ({
+        id, name: id, reasoning: true, input: ["text"], contextWindow: 1050000, maxTokens: 128000,
+        thinkingLevelMap: Object.fromEntries(["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((item) => [item, item === level ? level : null])),
+        cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+      })), { id: "unsupported", name: "Unsupported fixture", reasoning: false, input: ["text"], contextWindow: 1000000, maxTokens: 32000,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+    });
+  }
   let savedResult: SearchResult | undefined;
-  for (const [id, level] of modelLevels) {
+  for (const { provider, id, level } of modelCases) {
     currentModel = id;
     currentLevel = level;
     mainIndex = 0;
@@ -179,7 +265,7 @@ try {
     assert.equal(loader.getExtensions().extensions.length, 1);
     ({ session } = await sdk.createAgentSession({
       cwd: temporaryDirectory, agentDir: temporaryDirectory, settingsManager: settings, modelRuntime: runtime,
-      model: runtime.getModel("existing_gateway", id), thinkingLevel: level,
+      model: runtime.getModel(provider, id), thinkingLevel: level,
       resourceLoader: loader, sessionManager: sdk.SessionManager.inMemory(), tools: ["read", "web_run"],
     }));
     assert.ok(session);
@@ -192,7 +278,7 @@ try {
     assert.equal(baselineLoader.getExtensions().extensions.length, 0);
     ({ session: baseline } = await sdk.createAgentSession({
       cwd: temporaryDirectory, agentDir: temporaryDirectory, settingsManager: settings, modelRuntime: runtime,
-      model: runtime.getModel("existing_gateway", id), thinkingLevel: level,
+      model: runtime.getModel(provider, id), thinkingLevel: level,
       resourceLoader: baselineLoader, sessionManager: sdk.SessionManager.inMemory(), tools: ["read"],
     }));
     assert.ok(baseline);
@@ -238,14 +324,40 @@ try {
     assert.equal(countChecks, 1);
     assert.equal(generationCount, 1);
     await session.prompt("/web-search on");
-    const unsupportedModel = runtime.getModel("existing_gateway", "unsupported");
+    await writeFile(join(temporaryDirectory, "web-search.json"), JSON.stringify({ ...searchSettings, enableProvider: ["responsesWebSearch"] }));
+    await session.reload();
+    assert.equal(statuses.get("web-search"), "web: invalid setting");
+    assertDisabledMatchesBaseline(session, baseline);
+    await session.prompt("/web-search on");
+    assert.equal(statuses.get("web-search"), "web: invalid setting");
+    if (id === modelLevels[0][0]) {
+      await writeFile(join(temporaryDirectory, "web-search.json"), JSON.stringify(searchSettings));
+      await rm(join(temporaryDirectory, "web-search.schema.json"));
+      await session.reload();
+      assert.equal(statuses.get("web-search"), "web: invalid setting");
+      assertDisabledMatchesBaseline(session, baseline);
+      await writeFile(join(temporaryDirectory, "web-search.schema.json"), schemaText);
+      await writeFile(join(temporaryDirectory, "web-search.json"), JSON.stringify({ ...searchSettings, providers: { responsesWebSearch: { modelAllowList: [] } } }));
+      await session.reload();
+      assert.equal(statuses.get("web-search"), "web: unavailable");
+      assertDisabledMatchesBaseline(session, baseline);
+    }
+    await writeFile(join(temporaryDirectory, "web-search.json"), JSON.stringify(searchSettings));
+    await session.reload();
+    assert.equal(statuses.get("web-search"), "web: on");
+    await session.prompt("/web-search off");
+    await session.reload();
+    assert.equal(statuses.get("web-search"), "web: off", "Reload must preserve the branch preference");
+    assertDisabledMatchesBaseline(session, baseline);
+    await session.prompt("/web-search on");
+    const unsupportedModel = runtime.getModel(provider, "unsupported");
     assert.ok(unsupportedModel);
     await session.setModel(unsupportedModel);
     await baseline.setModel(unsupportedModel);
     assertDisabledMatchesBaseline(session, baseline);
     assert.equal(statuses.get("web-search"), "web: unavailable");
     assert.ok(!session.getActiveToolNames().includes("web_run"));
-    const supportedModel = runtime.getModel("existing_gateway", id);
+    const supportedModel = runtime.getModel(provider, id);
     assert.ok(supportedModel);
     await session.setModel(supportedModel);
     assert.equal(statuses.get("web-search"), "web: on");
@@ -259,7 +371,7 @@ try {
     baseline.dispose();
     baseline = undefined;
     assert.equal(statuses.has("web-search"), false);
-    console.log(`PASS: ${id}; search reasoning low, main reasoning ${level}, isolated context, budget, usage, read, controls, and disabled-state baseline equivalence`);
+    console.log(`PASS: ${provider}/${id}; search reasoning low, main reasoning ${level}, isolated context, budget, usage, read, controls, config reload, and off/invalid/unavailable baseline equivalence`);
   }
 
   phase = "checking installed Powerline and tool renderers";
@@ -313,7 +425,7 @@ try {
     for (const colorMode of ["truecolor", "256color"] as const) {
       const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci_dark.json"), colorMode);
       themeApi.setThemeInstance(theme);
-      for (const value of ["web: on", "web: off", "web: unavailable"]) {
+      for (const value of ["web: on", "web: off", "web: unavailable", "web: invalid setting"]) {
         statuses.set("web-search", value);
         const rendered = segments.renderSegment("custom:web_search", {
           theme, colors: preset.colors, customItemsById: new Map(config.customItems.map((item) => [item.id, item])),
@@ -328,7 +440,7 @@ try {
           const call = renderers.renderCall({ query: longQuery }, theme, { expanded: false });
           const callLines = call.render(width);
           assert.equal(callLines.length, 1);
-          assert.equal(stripVTControlCharacters(callLines[0]).trim(), "web.run");
+          assert.equal(stripVTControlCharacters(callLines[0]).trim(), "web_run");
           for (const { result, label, isPartial } of renderCases) {
             const component = renderers.renderResult(result, { expanded: false, isPartial }, theme, resultContext);
             const lines = [...callLines, ...component.render(width)];
@@ -353,7 +465,7 @@ try {
             tool.updateResult({ ...longResult, isError: false });
             const collapsed = tool.render(width).map(stripVTControlCharacters).filter((line: string) => line.trim());
             assert.equal(collapsed.length, 2, "Pi's complete tool component must retain the two-line collapsed UI");
-            assert.equal(collapsed[0].trim(), "web.run");
+            assert.equal(collapsed[0].trim(), "web_run");
             assert.ok(collapsed.every((line: string) => tui.visibleWidth(line) <= width));
             assert.doesNotMatch(collapsed.join("\n"), /\.\.\.|…|MSFT|Timestamp|###|\|/u);
             if (width === 120) {
@@ -402,6 +514,8 @@ try {
 } finally {
   clearInterval(heartbeat);
   globalThis.fetch = originalFetch;
+  if (originalAgentDirectory === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = originalAgentDirectory;
   try {
     baseline?.dispose();
     if (session) {
@@ -410,6 +524,7 @@ try {
     }
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true, maxRetries: 3 });
+    assert.equal(existsSync(temporaryDirectory), false, "Owned integration directory must be absent");
     process.stderr.write(`${passed ? "SUCCESS" : "FAILED"}: web-search integration; temporary fixtures removed\n`);
   }
 }

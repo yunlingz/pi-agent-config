@@ -5,6 +5,8 @@
 !TYPESCRIPT.md
 !models.json
 !settings.json
+!web-search.json
+!web-search.schema.json
 !README.md
 !/tsconfig.json
 !/scripts/
@@ -31,6 +33,8 @@
 !/extensions/web-search/
 !/extensions/web-search/index.ts
 !/extensions/web-search/types.ts
+!/extensions/web-search/config.ts
+!/extensions/web-search/providers.ts
 !/extensions/web-search/citations.ts
 !/extensions/web-search/search-request.ts
 !/extensions/web-search/render.ts

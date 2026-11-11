@@ -15,7 +15,7 @@ export interface SearchRegistry {
   streamSimple(model: Model<Api>, context: Context, options: ModelsSimpleStreamOptions): AsyncIterable<AssistantMessageEvent>;
 }
 
-interface SearchOptions {
+export interface SearchOptions {
   ctx: { modelRegistry: SearchRegistry };
   model: Model<Api>;
   query: string;
@@ -56,7 +56,7 @@ export function searchPayload(payload: unknown): Record<string, unknown> {
   const result: Record<string, unknown> = {
     ...payload,
     tools: [{ type: "web_search" }],
-    tool_choice: { type: "web_search" },
+    tool_choice: "required",
     reasoning: { effort: "low" },
     max_output_tokens: OUTPUT_TOKEN_LIMIT,
     truncation: "disabled",
