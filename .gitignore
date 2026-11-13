@@ -24,6 +24,10 @@
 !/extensions/auto-compact/verify-summary-integration.ts
 !/extensions/auto-compact/verify-integration.ts
 !/extensions/auto-compact/README.md
+!/extensions/parallel-compact/
+!/extensions/parallel-compact/index.ts
+!/extensions/parallel-compact/verify.ts
+!/extensions/parallel-compact/README.md
 !/extensions/token-usage/
 !/extensions/token-usage/index.ts
 !/extensions/token-usage/token-usage.ts
