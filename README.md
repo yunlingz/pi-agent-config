@@ -8,7 +8,9 @@ Run `pi --no-mcp` from a project folder. Use `pi --no-mcp --continue` to resume 
 `/model` selects a model, `/thinking` changes reasoning effort, and `/compact` starts manual compaction.
 
 The maintained configuration targets Pi 1.4.0 and Node.js 22.19 or newer compatible runtimes.
-Pi is npm-managed. The active executable determines its installation prefix; no fixed drive or shell is required.
+The upgrade skill supports existing npm global and Yarn Classic global installations.
+It identifies the active executable's installation before choosing a package manager.
+It preserves that manager and its package and binary locations; no fixed drive or shell is required.
 The upgrade skills use the approved company registry and disable lifecycle scripts.
 They do not use `pi update` or modify installed code directly.
 
