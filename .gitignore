@@ -13,6 +13,11 @@
 !/scripts/test-fixtures.ts
 !/scripts/verification-data.ts
 !/scripts/verification-data.test.ts
+!/scripts/compaction-fixtures.ts
+!/scripts/compaction-fixtures.test.ts
+!/scripts/live-verification.ts
+!/scripts/live-verification.test.ts
+!/scripts/verify-extensions.ts
 !/licenses/
 !/licenses/ste/
 !/licenses/ste/LICENSE
@@ -27,6 +32,7 @@
 !/extensions/parallel-compact/
 !/extensions/parallel-compact/index.ts
 !/extensions/parallel-compact/verify.ts
+!/extensions/parallel-compact/verify-live.ts
 !/extensions/parallel-compact/README.md
 !/extensions/token-usage/
 !/extensions/token-usage/index.ts
@@ -65,6 +71,5 @@
 !/skills/mcp-free-tools/SKILL.md
 !/skills/upgrade-pi-extensions/
 !/skills/upgrade-pi-extensions/SKILL.md
-!/skills/upgrade-pi-extensions/README.md
 !/skills/upgrade-pi-agent/
 !/skills/upgrade-pi-agent/SKILL.md

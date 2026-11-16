@@ -251,7 +251,7 @@ try {
   const jiti = createJiti(import.meta.url, {
     fsCache: join(temporaryDirectory, "jiti-cache"),
     alias: {
-      "@earendil-works/pi-tui": require.resolve("@earendil-works/pi-tui"),
+      "@earendil-works/pi-tui": resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory),
       "@earendil-works/pi-coding-agent": join(packageDirectory, "dist/index.js"),
       "@earendil-works/pi-ai": aiEntry,
     },
@@ -276,7 +276,7 @@ try {
   const hidden = configApi.collectHiddenExtensionStatusKeys(config.customItems);
   assert.ok(hidden.has(STATUS_KEY));
   const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
-  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(require.resolve("@earendil-works/pi-tui")).href);
+  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory)).href);
   for (const mode of ["truecolor", "256color"] as const) {
     const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci_dark.json"), mode);
     const context = {

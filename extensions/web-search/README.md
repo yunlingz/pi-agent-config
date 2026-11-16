@@ -186,7 +186,7 @@ node verify-integration.ts <installed-pi-package-directory>
 ```
 
 The integration check uses the installed Pi transport, extension loader, tool execution, persistence, usage accounting, and renderers.
-It checks the three supplied models and an additional model/provider configured only in the isolated fixture.
+It checks synthetic providers and model identifiers with different reasoning levels, independent of the saved model configuration.
 Every search must use the bare hosted tool, required tool choice, and low reasoning while preserving main-session effort.
 It also tests schema failures, local schema authority, invalid status, reload/recovery, isolated context, budgets, citations, local `read`, and controls.
 Model switching and Powerline states remain covered.
@@ -196,15 +196,24 @@ Rendered checks cover both theme color modes, long query and table content, narr
 Collapsed searches must use two lines without query text, result previews, or ellipses.
 Rendering checks cover completed searches with and without structured citations, progress phases, failures, cancellations, and plain answer links.
 
-The following checks make real requests through saved gateway credentials and can incur charges:
+From the agent directory, one command runs all offline plugin checks:
 
 ```text
-node verify-live.ts <installed-pi-package-directory> gpt-6.1-sol
-node verify-live.ts <installed-pi-package-directory> gpt-6-astra
-node verify-live.ts <installed-pi-package-directory> gpt-6.1-terra
+node scripts/verify-extensions.ts <installed-pi-package-directory> offline
 ```
 
-Each check starts Pi with `--no-mcp`, this extension, and a temporary observer.
+The optional live check uses Pi's configured default provider, model, reasoning level, and authentication.
+It makes real requests and can incur charges:
+
+```text
+node verify-live.ts <installed-pi-package-directory> [provider/model]
+```
+
+The optional override must identify an exact configured model. No model substitution occurs.
+The selected model must satisfy the configured search provider's capabilities and allowlist.
+For `responsesWebSearch`, these include the Responses API, hosted search, low search effort, and input-token counting.
+These are plugin capability requirements, not fixed vendor or model choices. Unsupported configurations fail before generation when detectable.
+The check starts Pi with `--no-mcp`, this extension, and a temporary observer.
 It retains Pi's normal system prompt and appends brief test constraints.
 The observer checks that the first serialized model request contains all registered search guidelines, without logging the prompt.
 It tests supplied text, model-selected current-fact research, evidence reuse, useful local `bash`, disabling search, and local `read`.
@@ -213,8 +222,8 @@ For this fixture, a smoke check rejects common explicit web-fetch commands durin
 The detector is not a shell parser or a runtime restriction; it does not prove that arbitrary scripts cannot retrieve data.
 The shortening request must reuse existing findings without another search.
 It audits both serialized search requests for the bare hosted tool, required tool choice, and low effort.
-It also checks provider-reported reasoning usage.
-It also checks that main-session effort stays unchanged and reports the measured search duration.
+When reasoning usage is reported, the check validates it. Missing optional reasoning usage does not fail verification.
+The check confirms that main-session effort stays unchanged and reports the measured search duration.
 The process limit is 240 seconds. Main test responses have an 8,192-token limit; the independent search retains its 32,000-token ceiling.
 Temporary files are removed after the check. Saved configuration files are not changed.
 A passing run covers these prompts and that model; it does not establish a general search-selection rate.

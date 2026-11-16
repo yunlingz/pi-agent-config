@@ -9,7 +9,7 @@ import { stripVTControlCharacters } from "node:util";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import type { AgentSession, ProviderModelConfig, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { testTUI, testUI, type FooterConfigModule, type FooterPresetsModule, type FooterSegmentsModule } from "../../scripts/test-fixtures.ts";
-import { readJson, readPackageInfo } from "../../scripts/verification-data.ts";
+import { readJson, readPackageInfo, resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import type { CitationAnnotation, SearchDetails, SearchResult } from "./types.ts";
 import type { FixtureEvent, FixtureMessage, FixtureOutput, FixtureToolCall, VerificationPayload } from "./verification-fixtures.ts";
 import { createSearchRenderers } from "./render.ts";
@@ -26,9 +26,9 @@ assert.equal(packageInfo.name, "@earendil-works/pi-coding-agent");
 const require = createRequire(pathToFileURL(join(packageDirectory, "package.json")));
 const originalFetch = globalThis.fetch;
 const originalAgentDirectory = process.env.PI_CODING_AGENT_DIR;
-const modelLevels = [["gpt-6-astra", "high"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
+const modelLevels = [["fixture-high", "high"], ["fixture-xhigh", "xhigh"], ["fixture-max", "max"]] as const;
 const modelCases = [
-  ...modelLevels.map(([id, level]) => ({ provider: "existing_gateway", id, level })),
+  ...modelLevels.map(([id, level]) => ({ provider: "fixture-provider", id, level })),
   { provider: "fixture_gateway", id: "future/model", level: "high" as const },
 ];
 const statuses = new Map<string, string>();
@@ -225,9 +225,11 @@ try {
   };
   const validator: typeof import("typebox/value") = await import(pathToFileURL(require.resolve("typebox/value")).href);
   const schemaText = await readFile(join(agentDirectory, "web-search.schema.json"), "utf8");
-  const searchSettings = readJson<SearchSettings>(join(agentDirectory, "web-search.json"));
+  const searchSettings: SearchSettings = {
+    $schema: "./web-search.schema.json", enableProvider: "responsesWebSearch",
+    providers: { responsesWebSearch: { modelAllowList: modelCases.map(({ provider, id }) => `${provider}/${id}`) } },
+  };
   await verifyConfiguration(validator.Errors, schemaText, searchSettings);
-  searchSettings.providers.responsesWebSearch.modelAllowList.push("fixture_gateway/future/model");
   await writeFile(join(temporaryDirectory, "web-search.json"), JSON.stringify(searchSettings));
   const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
   await writeFile(join(temporaryDirectory, "marker.txt"), "WEB_SEARCH_READ_OK\n");
@@ -375,16 +377,16 @@ try {
   }
 
   phase = "checking installed Powerline and tool renderers";
-  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(join(packageDirectory, "node_modules/@earendil-works/pi-tui/dist/index.js")).href);
+  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory)).href);
   const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
   const { ToolExecutionComponent }: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/components/tool-execution.js")).href);
   const { createJiti }: {
     createJiti(path: string, options: { fsCache: string; alias: Record<string, string> }): { import<T>(path: string): Promise<T> };
   } = await import(pathToFileURL(require.resolve("jiti")).href);
   const jiti = createJiti(import.meta.url, { fsCache: join(temporaryDirectory, "jiti-cache"), alias: {
-    "@earendil-works/pi-tui": require.resolve("@earendil-works/pi-tui"),
+    "@earendil-works/pi-tui": resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory),
     "@earendil-works/pi-coding-agent": join(packageDirectory, "dist/index.js"),
-    "@earendil-works/pi-ai": join(packageDirectory, "node_modules/@earendil-works/pi-ai/dist/index.js"),
+    "@earendil-works/pi-ai": resolveInstalledEntry("@earendil-works/pi-ai", packageDirectory),
   } });
   const footerDirectory = join(agentDirectory, "npm/node_modules/pi-powerline-footer");
   const configApi = await jiti.import<FooterConfigModule>(join(footerDirectory, "powerline-config.ts"));

@@ -9,15 +9,17 @@ import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai"
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { JsonAgentSessionEvent, SessionHeader } from "@earendil-works/pi-coding-agent";
 import { parseTrustedJson } from "../../scripts/verification-data.ts";
+import { closeLiveSession, createLiveSession, parseLiveArguments } from "../../scripts/live-verification.ts";
+import { loadSearchConfiguration } from "./config.ts";
+import { createRequire } from "node:module";
 import type { SearchDetails } from "./types.ts";
 import { looksLikeWebRetrieval, type VerificationAudit } from "./verification-fixtures.ts";
 
-const [packageArgument, modelId] = process.argv.slice(2);
-const levels: Record<string, string> = { "gpt-6-astra": "high", "gpt-6.1-sol": "xhigh", "gpt-6.1-terra": "max" };
-assert.ok(packageArgument && modelId && levels[modelId], "Usage: node verify-live.ts <installed-pi-package-directory> <model-id>");
-const packageDirectory = resolve(packageArgument);
+const liveArguments = parseLiveArguments(process.argv.slice(2));
+const { packageDirectory } = liveArguments;
 const extensionDirectory = dirname(fileURLToPath(import.meta.url));
-const agentDirectory = resolve(extensionDirectory, "../..");
+const agentDirectory = process.env.PI_CODING_AGENT_DIR ?? resolve(extensionDirectory, "../..");
+let selection = "configured default";
 const marker = "WEB_SEARCH_FOLLOW_UP_OK";
 let child: ChildProcess | undefined;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -31,6 +33,25 @@ const messages: AgentMessage[] = [];
 
 const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-web-search-live-"));
 try {
+  const preflight = await createLiveSession({
+    ...liveArguments, agentDirectory, cwd: temporaryDirectory, extensionPaths: [join(extensionDirectory, "index.ts")],
+  });
+  const selectedModel = preflight.session.model;
+  const thinkingLevel = preflight.session.thinkingLevel;
+  try {
+    assert(selectedModel, "Select a default model or pass an exact provider/model override");
+    assert.equal(selectedModel.api, "openai-responses", "The configured search provider requires the Responses API; no fallback is permitted");
+    const require = createRequire(pathToFileURL(join(packageDirectory, "package.json")));
+    const validator: typeof import("typebox/value") = await import(pathToFileURL(require.resolve("typebox/value")).href);
+    const configuration = await loadSearchConfiguration(agentDirectory, validator.Errors);
+    assert(configuration.status === "valid" && configuration.provider.supports(selectedModel),
+      "The selected model is not enabled by web-search configuration; no fallback is permitted");
+  } finally {
+    await closeLiveSession(preflight.session);
+  }
+  assert(selectedModel);
+  const modelId = selectedModel.id;
+  selection = `${selectedModel.provider}/${modelId}`;
   const observerPath = join(temporaryDirectory, "observer.ts");
   const auditPath = join(temporaryDirectory, "audit.jsonl");
   await writeFile(join(temporaryDirectory, "marker.txt"), `${marker}\n`);
@@ -44,7 +65,7 @@ export default createObserver(${JSON.stringify(auditPath)});
     "--extension", join(extensionDirectory, "index.ts"), "--extension", observerPath,
     "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-themes",
     "--offline", "--approve", "--no-session", "--mode", "json", "--tools", "read,bash,web_run",
-    "--provider", "existing_gateway", "--model", modelId, "--thinking", levels[modelId],
+    "--provider", selectedModel.provider, "--model", modelId, "--thinking", thinkingLevel,
     "--append-system-prompt", "Keep answers brief. Do not change files. Use Node.js for any scripts. Do not use MCP.",
     "Transform this supplied text to uppercase: stable_test_ok. Reply with only the transformed text.",
     "What is the current Node.js LTS version? Include an official source link.",
@@ -52,7 +73,7 @@ export default createObserver(${JSON.stringify(auditPath)});
     "/web-search off",
     "Do not search. Read marker.txt with read. Return its exact marker and one source URL from your previous answer. Do not change files.",
   ];
-  console.log(`START: ${modelId}; no-search task, model-selected search, evidence reuse, useful local bash, off control, and read follow-up; 240-second limit`);
+  console.log(`START: ${selection}; no-search task, model-selected search, evidence reuse, useful local bash, off control, and read follow-up; 240-second limit`);
   const processChild = spawn(process.execPath, args, {
     cwd: temporaryDirectory, shell: false, windowsHide: true,
     env: { ...process.env, PI_CODING_AGENT_DIR: agentDirectory, PI_OFFLINE: "1", PI_TELEMETRY: "0" },
@@ -89,9 +110,9 @@ export default createObserver(${JSON.stringify(auditPath)});
   });
   processChild.stderr.on("data", (chunk: Buffer) => { errorBytes += chunk.length; });
   heartbeat = setInterval(() => {
-    process.stderr.write(`[${new Date().toISOString()}] ${modelId}: waiting for Pi; ${messages.length} completed messages\n`);
+    process.stderr.write(`[${new Date().toISOString()}] ${selection}: waiting for Pi; ${messages.length} completed messages\n`);
   }, 20_000);
-  timeout = setTimeout(() => { timedOut = true; child?.kill(); }, 240_000);
+  timeout = setTimeout(() => { timedOut = true; child?.kill("SIGKILL"); }, 240_000);
   const code = await new Promise<number | null>((resolveExit, reject) => {
     processChild.once("error", reject);
     processChild.once("close", resolveExit);
@@ -117,7 +138,7 @@ export default createObserver(${JSON.stringify(auditPath)});
   assert.ok(audit.length >= 6, "Require the stable answer, research call/follow-up, evidence reuse, and read call/follow-up");
   for (const request of audit) {
     assert.equal(request.model, modelId);
-    assert.equal(request.effort, levels[modelId]);
+    assert.equal(request.effort, audit[0].effort, "Search must not change serialized main-session effort");
     assert.ok(!request.toolTypes?.some((type) => ["web_search", "web_search_preview"].includes(type)), "Main requests must not declare hosted search");
     assert.notEqual(request.toolChoice, "required");
   }
@@ -157,7 +178,7 @@ export default createObserver(${JSON.stringify(auditPath)});
   assert.ok(search.details.searchCount !== undefined && search.details.searchCount > 0);
   assert.ok(search.details.sources.length > 0);
   assert.ok(search.usage && search.usage.totalTokens > 0, "Independent usage reaches the tool result");
-  assert.ok(typeof search.usage.reasoning === "number" && search.usage.reasoning >= 0, "The provider must report search reasoning usage");
+  if (search.usage.reasoning !== undefined) assert.ok(search.usage.reasoning >= 0);
   const sourceText = search.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
   assert.ok(search.details.sources.some((source) => sourceText.includes(`](<${source.url}>)`)), "Tool result must include a usable citation link");
   assert.ok(messages.some((message) => message.role === "toolResult" && message.toolName === "read" && !message.isError));
@@ -167,16 +188,16 @@ export default createObserver(${JSON.stringify(auditPath)});
   assert.match(finalText, new RegExp(marker));
   assert.match(finalText, /https?:\/\//u);
   passed = true;
-  console.log(`PASS: ${modelId}; main effort ${levels[modelId]}, search effort low, ${search.usage.reasoning} reasoning tokens, ${(search.details.elapsedMs / 1000).toFixed(1)}s search, ${search.details.inputTokens} counted input tokens, ${search.details.sources.length} sources; model-selected search, evidence reuse without a recognized extra web fetch, useful local bash, no-search task, and off control passed`);
+  console.log(`PASS: ${selection}; main level ${thinkingLevel}, search effort low, ${search.usage.reasoning ?? "unreported"} reasoning tokens, ${(search.details.elapsedMs / 1000).toFixed(1)}s search, ${search.details.inputTokens} counted input tokens, ${search.details.sources.length} sources; model-selected search, evidence reuse without a recognized extra web fetch, useful local bash, no-search task, and off control passed`);
 } finally {
   clearInterval(heartbeat);
   clearTimeout(timeout);
   if (child && child.exitCode === null && child.signalCode === null) {
     const closed = new Promise<void>((resolveClose) => child?.once("close", () => resolveClose()));
-    child.kill();
+    child.kill("SIGKILL");
     await closed;
   }
   await rm(temporaryDirectory, { recursive: true, force: true, maxRetries: 3 });
   assert.equal(existsSync(temporaryDirectory), false, "Owned live-test directory must be absent");
-  process.stderr.write(`${passed ? "SUCCESS" : "FAILED"}: ${modelId}; temporary files removed\n`);
+  process.stderr.write(`${passed ? "SUCCESS" : "FAILED"}: ${selection}; temporary files removed\n`);
 }

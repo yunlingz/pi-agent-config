@@ -67,3 +67,20 @@ node extensions/token-usage/verify-integration.ts <installed-pi-package-director
 The integration check uses the installed Pi with a deterministic local provider and disabled MCP and network access.
 It checks manual and automatic compaction, failed and cancelled compaction, reload, persisted-session resume, configured layout, and rendering in both color modes.
 Temporary fixtures are removed after success or failure. User credentials and conversation history are not used.
+
+The shared offline command runs these checks with the other maintained plugins:
+
+```text
+node scripts/verify-extensions.ts <installed-pi-package-directory> offline
+```
+
+Optional live compaction and usage checks use Pi's configured model and authentication:
+
+```text
+node extensions/parallel-compact/verify-live.ts <installed-pi-package-directory> [provider/model]
+```
+
+The combined verifier checks token reset after idle and pre-quit compaction, then real reported usage after continuation.
+The optional override uses an exact configured provider/model identifier. No provider, model, or token count is hard-coded.
+The selected provider must report usage. Missing usage causes a clear failure, not a model substitution.
+Live requests can incur charges. Deterministic totals and renderer behavior remain covered by offline tests.

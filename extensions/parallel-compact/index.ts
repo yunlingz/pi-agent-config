@@ -103,12 +103,23 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const retry = SettingsManager.create(ctx.cwd, getAgentDir()).getRetrySettings();
+    const settings = SettingsManager.create(ctx.cwd, getAgentDir(), { projectTrusted: ctx.isProjectTrusted() });
+    const retry = settings.getRetrySettings();
+    const providerRetry = settings.getProviderRetrySettings();
+    const httpIdleTimeoutMs = settings.getHttpIdleTimeoutMs();
+    // Pi uses the maximum timer delay when the HTTP idle timeout is disabled.
+    const timeoutMs = providerRetry.timeoutMs ?? (httpIdleTimeoutMs === 0 ? 2_147_483_647 : httpIdleTimeoutMs);
     try {
       const result = await compactInParallel(
         event.preparation, model, undefined, undefined, event.customInstructions,
         event.signal, ctx.thinkingLevel,
-        (requestModel, context, options) => ctx.modelRegistry.streamSimple(requestModel, context, options),
+        (requestModel, context, options) => ctx.modelRegistry.streamSimple(requestModel, context, {
+          ...options,
+          timeoutMs: options?.timeoutMs ?? timeoutMs,
+          websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs ?? settings.getWebSocketConnectTimeoutMs(),
+          maxRetries: options?.maxRetries ?? providerRetry.maxRetries,
+          maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetry.maxRetryDelayMs,
+        }),
         undefined, retry,
       );
       // compact() produces these file arrays; the public result leaves details opaque.

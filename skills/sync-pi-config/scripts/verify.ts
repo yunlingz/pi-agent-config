@@ -238,7 +238,9 @@ async function runSession(packageDir: string, packageInfo: PackageInfo, agentDir
   } finally {
     clearTimeout(timeout);
     if (child.exitCode === null && child.signalCode === null) {
+      const closed = new Promise<void>((resolveClose) => child.once('close', () => resolveClose()));
       child.kill('SIGKILL');
+      await closed;
     }
   }
 }
@@ -251,7 +253,7 @@ async function main() {
   const packageDir = resolve(process.argv[2]);
   const packageInfo = readJson<PackageInfo>(join(packageDir, 'package.json'));
   if (packageInfo.name !== '@earendil-works/pi-coding-agent') throw new Error('Expected the installed Pi package');
-  const agentDir = fileURLToPath(new URL('../../../', import.meta.url));
+  const agentDir = process.env.PI_CODING_AGENT_DIR ?? fileURLToPath(new URL('../../../', import.meta.url));
   let phase = 'schema and skill checks';
   let receivedRecords = 0;
   let temporaryDirectory;
@@ -306,6 +308,7 @@ async function main() {
         maxRetries: 3,
         retryDelay: 100,
       });
+      if (existsSync(temporaryDirectory)) throw new Error('Temporary verification directory still exists');
       log('Temporary verification directory removed');
     }
   }

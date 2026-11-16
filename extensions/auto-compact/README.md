@@ -66,4 +66,23 @@ It compares manual and pre-quit summary inputs and checks that no additional ins
 It covers output limits, incomplete-summary rejection, explicit retry, unchanged reasoning/settings, and persistence of a complete checkpoint.
 The checks use synthetic history, keep MCP disabled, and remove temporary state.
 
-These checks do not wait 30 minutes in a real terminal or evaluate a real provider's summary quality.
+The shared offline command covers all maintained plugins, including idle compaction through parallel-compact:
+
+```text
+node scripts/verify-extensions.ts <installed-pi-package-directory> offline
+```
+
+The combined compaction verifier checks the actual idle trigger with a controlled extension clock.
+It checks the exact deadline, two concurrent summaries, single-summary delegation, failures, cancellation, persistence, and pre-quit ordering.
+It does not wait 30 minutes in a real terminal.
+
+Optional live checks use Pi's configured default provider, model, reasoning level, and authentication:
+
+```text
+node extensions/parallel-compact/verify-live.ts <installed-pi-package-directory> [provider/model]
+```
+
+The optional override must identify an exact configured model. The verifier never substitutes another model.
+Real requests can incur charges. The combined check covers idle and pre-quit compaction, parallel summaries, token reset, persistence, and continuation.
+The selected provider must support concurrent requests and report usage. Unsupported capabilities fail clearly.
+No fixed provider, endpoint, model, reasoning value, or provider-specific response field is required.

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
-import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ExtensionContext, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { testUI } from "../../scripts/test-fixtures.ts";
+import { createExtensionClock, IDLE_INTERVAL_MS } from "../../scripts/compaction-fixtures.ts";
 
 const packageArgument = process.argv[2];
 assert(packageArgument, "Usage: node verify.ts <installed-pi-package-directory>");
@@ -16,15 +17,23 @@ let session: AgentSession | undefined;
 let succeeded = false;
 let phase = "loading installed Pi";
 let heartbeat: NodeJS.Timeout | undefined;
+const originalAgentDirectory = process.env.PI_CODING_AGENT_DIR;
+const clock = createExtensionClock();
 const root = mkdtempSync(join(tmpdir(), "pi-parallel-compact-verify-"));
 try {
+  process.env.PI_CODING_AGENT_DIR = root;
   heartbeat = setInterval(() => {
     process.stderr.write(`[${new Date().toISOString()}] Parallel compaction verification: ${phase}\n`);
   }, 20_000);
   const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packagePath, "dist/index.js")).href);
   const require = createRequire(pathToFileURL(join(packagePath, "package.json")));
-  const aiPath = join(packagePath, "node_modules/@earendil-works/pi-ai/dist/index.js");
-  const compatPath = join(packagePath, "node_modules/@earendil-works/pi-ai/dist/compat.js");
+  // Pi AI has import-only exports and can be hoisted outside the Pi package.
+  const aiDirectory = require.resolve.paths("@earendil-works/pi-ai")
+    ?.map((path) => join(path, "@earendil-works/pi-ai"))
+    .find((path) => existsSync(join(path, "package.json")));
+  assert(aiDirectory, "The installed Pi AI package must be available");
+  const aiPath = join(aiDirectory, "dist/index.js");
+  const compatPath = join(aiDirectory, "dist/compat.js");
   const ai: typeof import("@earendil-works/pi-ai") = await import(pathToFileURL(aiPath).href);
   const jitiModule: typeof import("jiti") = await import(pathToFileURL(require.resolve("jiti")).href);
   const jiti = jitiModule.createJiti(import.meta.url, {
@@ -59,6 +68,8 @@ try {
     input: string;
     reasoning: string | undefined;
     cacheRetention: string | undefined;
+    requestOptions: Pick<NonNullable<Parameters<Stream>[2]>,
+      "timeoutMs" | "websocketConnectTimeoutMs" | "maxRetries" | "maxRetryDelayMs">;
   }
 
   function controlledStream({ retryKind, lengthKind, hold = false }: {
@@ -73,7 +84,13 @@ try {
       const messages = context.messages.map((message) => ({ role: message.role, content: message.content }));
       const input = JSON.stringify(messages);
       const kind: Kind = input.includes("# Conversation\\n") ? "prefix" : "history";
-      captures.push({ kind, input, reasoning: options?.reasoning, cacheRetention: options?.cacheRetention });
+      captures.push({
+        kind, input, reasoning: options?.reasoning, cacheRetention: options?.cacheRetention,
+        requestOptions: {
+          timeoutMs: options?.timeoutMs, websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs,
+          maxRetries: options?.maxRetries, maxRetryDelayMs: options?.maxRetryDelayMs,
+        },
+      });
       attempts[kind] += 1;
       const attempt = attempts[kind];
       active += 1;
@@ -181,11 +198,15 @@ try {
   const notifications: string[] = [];
   let shutdowns = 0;
   let provider = controlledStream();
-  const settings = sdk.SettingsManager.inMemory({
+  type Settings = ReturnType<SettingsManager["getSettings"]>;
+  const fixtureSettings = {
     extensions: ["-builtin:mcp"], packages: [], cacheWarming: "off",
     compaction: { keepRecentTokens: 300, reserveTokens: 1000 },
     retry: { enabled: false },
-  });
+  } satisfies Partial<Settings>;
+  writeFileSync(join(root, "settings.json"), JSON.stringify(fixtureSettings));
+  mkdirSync(join(root, ".pi"));
+  const settings = sdk.SettingsManager.create(root, root);
   const runtime = await sdk.ModelRuntime.create({
     authPath: join(root, "auth.json"), modelsPath: null,
     modelsStorePath: join(root, "models-store.json"), allowModelNetwork: false, refreshOnCreate: false,
@@ -195,15 +216,22 @@ try {
     assert(!(output instanceof Promise));
     return output;
   };
-  const loader = new sdk.DefaultResourceLoader({
+  const loaderOptions = {
     cwd: root, agentDir: root, settingsManager: settings,
     noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
     disabledBuiltinExtensions: ["mcp"],
+  };
+  const loader = new sdk.DefaultResourceLoader({
+    ...loaderOptions,
     additionalExtensionPaths: [join(extensionDirectory, "index.ts"), join(extensionDirectory, "../auto-compact/index.ts")],
   });
-  await loader.reload();
+  const nativeLoader = new sdk.DefaultResourceLoader(loaderOptions);
+  await clock.load(() => loader.reload());
+  await nativeLoader.reload();
   assert.deepEqual(loader.getExtensions().errors, []);
+  assert.deepEqual(nativeLoader.getExtensions().errors, []);
   assert.equal(loader.getExtensions().extensions.length, 2);
+  assert.equal(nativeLoader.getExtensions().extensions.length, 0);
 
   const zeroUsage: Usage = {
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
@@ -232,15 +260,22 @@ try {
     });
   }
 
-  async function createSession() {
+  async function createSession(resourceLoader = loader, split = true) {
     const manager = sdk.SessionManager.create(root, join(root, "sessions"));
-    populate(manager);
+    if (split) {
+      populate(manager);
+    } else {
+      manager.appendMessage({ role: "user", content: "Single user-message span. ".repeat(200), timestamp: 1 });
+      manager.appendMessage({
+        role: "assistant", api: model.api, provider: model.provider, model: model.id, stopReason: "stop", timestamp: 2,
+        content: [{ type: "text", text: "Recent retained work. ".repeat(100) }], usage: zeroUsage,
+      });
+    }
     const created = await sdk.createAgentSession({
       cwd: root, agentDir: root, model, thinkingLevel: "xhigh", modelRuntime: runtime,
-      settingsManager: settings, resourceLoader: loader, sessionManager: manager, tools: [],
+      settingsManager: settings, resourceLoader, sessionManager: manager, tools: [],
     });
     session = created.session;
-    session.agent.streamFunction = (requestModel, context, options) => provider.stream(requestModel, context, options);
     await session.bindExtensions({
       mode: "tui", uiContext: testUI(session, { notify: (text) => notifications.push(text), onTerminalInput: () => () => {} }),
       shutdownHandler: () => { shutdowns += 1; }, onError: (error) => errors.push(error),
@@ -266,8 +301,114 @@ try {
     }
   }
 
-  phase = "checking checkpoint persistence and repeated file tracking";
+  const requestCases: { name: string; global: Partial<Settings>; project?: Partial<Settings>; trusted?: boolean }[] = [
+    { name: "default request settings", global: {} },
+    {
+      name: "configured provider settings",
+      global: { httpIdleTimeoutMs: 45678, websocketConnectTimeoutMs: 6789,
+        retry: { enabled: false, provider: { timeoutMs: 12345, maxRetries: 4, maxRetryDelayMs: 789 } } },
+    },
+    {
+      name: "trusted project overrides",
+      global: { retry: { enabled: false, provider: { timeoutMs: 45678, maxRetries: 2, maxRetryDelayMs: 789 } } },
+      project: { websocketConnectTimeoutMs: 6789, retry: { provider: { timeoutMs: 12345, maxRetries: 4 } } },
+    },
+    { name: "HTTP idle fallback", global: { httpIdleTimeoutMs: 4321 } },
+    {
+      name: "disabled idle timeout and zero retry limits",
+      global: { httpIdleTimeoutMs: 0, websocketConnectTimeoutMs: 0,
+        retry: { enabled: false, provider: { maxRetries: 0, maxRetryDelayMs: 0 } } },
+    },
+    { name: "zero provider timeout", global: { retry: { enabled: false, provider: { timeoutMs: 0 } } } },
+    {
+      name: "untrusted project settings", global: { httpIdleTimeoutMs: 4321 }, trusted: false,
+      project: { httpIdleTimeoutMs: 9999, websocketConnectTimeoutMs: 8888,
+        retry: { provider: { timeoutMs: 7777, maxRetries: 6, maxRetryDelayMs: 5555 } } },
+    },
+  ];
+  for (const fixture of requestCases) {
+    phase = `comparing native and parallel ${fixture.name}`;
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ ...fixtureSettings, ...fixture.global }));
+    writeFileSync(join(root, ".pi/settings.json"), JSON.stringify(fixture.project ?? {}));
+    settings.setProjectTrusted(fixture.trusted ?? true);
+    await settings.reload();
+    provider = controlledStream();
+    const nativeSession = await createSession(nativeLoader);
+    await nativeSession.session.compact();
+    assert.equal(provider.maximumActive, 1);
+    const nativeCaptures = provider.captures;
+    assert.equal(nativeCaptures.length, 2);
+    await disposeSession();
+
+    provider = controlledStream();
+    const parallelSession = await createSession();
+    await parallelSession.session.compact();
+    assert.equal(provider.maximumActive, 2);
+    assert.equal(provider.captures.length, 2);
+    for (const capture of provider.captures) {
+      const expected = nativeCaptures.find((native) => native.kind === capture.kind);
+      assert(expected);
+      assert.deepEqual(capture.requestOptions, expected.requestOptions, fixture.name);
+      assert.equal(capture.input, expected.input, "Request settings must not change summary prompts");
+      assert.equal(capture.reasoning, expected.reasoning);
+      assert.equal(capture.cacheRetention, expected.cacheRetention);
+    }
+    await disposeSession();
+  }
+  writeFileSync(join(root, "settings.json"), JSON.stringify(fixtureSettings));
+  writeFileSync(join(root, ".pi/settings.json"), "{}");
+  settings.setProjectTrusted(true);
+  await settings.reload();
+  provider = controlledStream();
+
+  phase = "checking actual idle trigger with both plugins";
   let current = await createSession();
+  clock.advance(IDLE_INTERVAL_MS - 1);
+  assert.equal(provider.captures.length, 0, "Idle compaction must not start early");
+  clock.advance(1);
+  await waitFor(() => current.manager.getBranch().some((entry) => entry.type === "compaction"));
+  await current.session.waitForIdle();
+  assert.equal(provider.captures.length, 2);
+  assert.equal(provider.maximumActive, 2);
+  assert(provider.captures.every((capture) => !capture.input.includes("Additional focus:")));
+  const idleEntry = current.manager.getBranch().find((entry) => entry.type === "compaction");
+  assert(idleEntry?.fromHook === true);
+  assert.equal(shutdowns, 0, "Idle compaction must not quit");
+  await disposeSession();
+
+  phase = "checking single-summary idle compaction remains native";
+  provider = controlledStream();
+  current = await createSession(loader, false);
+  clock.advance(IDLE_INTERVAL_MS);
+  await waitFor(() => current.manager.getBranch().some((entry) => entry.type === "compaction"));
+  await current.session.waitForIdle();
+  assert.equal(provider.captures.length, 1);
+  assert.equal(provider.maximumActive, 1);
+  assert.equal(current.manager.getBranch().find((entry) => entry.type === "compaction")?.fromHook, false);
+  await disposeSession();
+
+  phase = "checking failed and cancelled idle compaction";
+  for (const cancelled of [false, true]) {
+    notifications.length = 0;
+    provider = cancelled ? controlledStream({ hold: true }) : controlledStream({ lengthKind: "history" });
+    current = await createSession();
+    clock.advance(IDLE_INTERVAL_MS);
+    if (cancelled) {
+      await waitFor(() => provider.active === 2);
+      current.session.abortCompaction();
+    }
+    await waitFor(() => notifications.some((text) => text.includes("Idle compaction failed")));
+    assert.equal(provider.active, 0);
+    assert.equal(current.manager.getBranch().filter((entry) => entry.type === "compaction").length, 0);
+    assert.equal(shutdowns, 0);
+    const attempts = provider.captures.length;
+    clock.advance(IDLE_INTERVAL_MS);
+    assert.equal(provider.captures.length, attempts, "An unchanged idle spell must not retry");
+    await disposeSession();
+  }
+  provider = controlledStream();
+  phase = "checking checkpoint persistence and repeated file tracking";
+  current = await createSession();
   const first = await current.session.compact("Preserve exact paths.");
   assert.equal(provider.maximumActive, 2);
   assert.equal(provider.captures.length, 2);
@@ -332,7 +473,7 @@ try {
   await disposeSession();
   assert.deepEqual(errors, []);
   succeeded = true;
-  process.stdout.write("PASS: native prompt/result parity; exactly two concurrent requests; optional usage totals; history/prefix retries; one-summary paths; cancellation; checkpoint persistence; repeated file tracking; successful/failed/cancelled pre-quit flow.\n");
+  process.stdout.write("PASS: native prompt/result parity; native request settings across seven cases; actual idle trigger, boundary, single-summary, failure and cancellation; exactly two concurrent requests; optional usage totals; history/prefix retries; one-summary paths; cancellation; checkpoint persistence; repeated file tracking; successful/failed/cancelled pre-quit flow.\n");
 } finally {
   clearInterval(heartbeat);
   try {
@@ -343,6 +484,12 @@ try {
       session.dispose();
     }
   } finally {
+    clock.dispose();
+    if (originalAgentDirectory === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_DIR = originalAgentDirectory;
+    }
     rmSync(root, { recursive: true, force: true });
     assert.equal(existsSync(root), false);
     process.stderr.write(`[${new Date().toISOString()}] Temporary verification state removed; ${succeeded ? "SUCCESS" : "FAILED"}\n`);

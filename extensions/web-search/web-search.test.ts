@@ -9,7 +9,7 @@ import { looksLikeWebRetrieval } from "./verification-fixtures.ts";
 import { createBudgetedFetch, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, runSearch, searchPayload, type SearchRegistry } from "./search-request.ts";
 import { registerWebSearch, SEARCH_GUIDELINES, STATE_TYPE, TOOL_NAME, type RegisteredSearchTool, type SearchContext, type SearchEntry, type SearchExtension, type SearchStartEvent } from "./web-search.ts";
 
-const MODELS = [["gpt-6-astra", "high"], ["gpt-6.1-sol", "xhigh"], ["gpt-6.1-terra", "max"]] as const;
+const MODELS = [["fixture-high", "high"], ["fixture-xhigh", "xhigh"], ["fixture-max", "max"]] as const;
 const PARAMETERS = {
   "~kind": "Object", type: "object", required: ["query"],
   properties: {
@@ -20,7 +20,7 @@ const PARAMETERS = {
 
 function modelFixture(id: string = "model"): Model<Api> {
   return {
-    id, name: id, provider: "existing_gateway", api: "openai-responses", baseUrl: "https://example.com/v1",
+    id, name: id, provider: "fixture-provider", api: "openai-responses", baseUrl: "https://example.com/v1",
     reasoning: true, input: ["text"], contextWindow: 1050000, maxTokens: 128000,
     cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
   };
@@ -76,7 +76,7 @@ function harness({ id = MODELS[0][0], mode = "tui", active = true, configuration
   };
   registerWebSearch(pi, { parameters: PARAMETERS }, configuration ?? {
     status: "valid", configPath: "fixture/web-search.json",
-    provider: responsesWebSearch({ modelAllowList: MODELS.map(([id]) => `existing_gateway/${id}`) }),
+    provider: responsesWebSearch({ modelAllowList: MODELS.map(([id]) => `fixture-provider/${id}`) }),
   });
   const tool = state.tools.get(TOOL_NAME);
   const command = commands.get("web-search");
@@ -101,7 +101,7 @@ function harness({ id = MODELS[0][0], mode = "tui", active = true, configuration
 function response(stopReason: AssistantMessage["stopReason"] = "stop"): AssistantMessage {
   return {
     role: "assistant", content: [{ type: "text", text: TEXT }], stopReason, usage: USAGE,
-    api: "openai-responses", provider: "existing_gateway", model: "model", timestamp: 0,
+    api: "openai-responses", provider: "fixture-provider", model: "model", timestamp: 0,
   };
 }
 

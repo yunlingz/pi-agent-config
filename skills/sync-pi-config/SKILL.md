@@ -1,94 +1,97 @@
 ---
 name: sync-pi-config
 description: >
-  Validate global Pi configuration with the installed Pi.
-  Run a real temporary agent test.
-  Commit reviewed configuration changes locally.
-  Use when asked to sync, verify, or save global configuration in Git.
+  Verify global Pi configuration, skills, and maintained plugins with the installed Pi.
+  Run a temporary read-only live session.
+  Save reviewed changes in a local commit when requested.
+  Never update Pi or push.
 ---
 
-# Sync Pi configuration
+# Verify and save global Pi configuration
 
-## Scope
+## Scope and authorization
 
-- **Repository**
-  - Work in the Git repository containing this skill, not the caller's project.
-  - The repository is `../..` from this skill directory.
-  - Confirm it is the active agent directory: `PI_CODING_AGENT_DIR`, otherwise `~/.pi/agent`.
-- **Prohibited changes**
-  - Never update Pi.
-  - Never install dependencies.
-  - Never push.
-  - Never change a remote.
+- Work in the active agent directory: `PI_CODING_AGENT_DIR`, otherwise `~/.pi/agent`.
+- Confirm that it is the repository containing this skill, at `../..`.
+- When the user requests verification only, do not stage or commit.
+- When the user requests sync or a local save, commit only reviewed changes within that request.
+- Do not upgrade Pi, install runtime packages, push, change remotes, or alter credentials.
+- Keep MCP disabled in every test. Do not load MCP adapters.
+- Follow global TypeScript rules when code changes require static checks.
 
-## Workflow
+## Review the starting state
 
-1. **Review the starting state.**
-   - Inspect `git status --short`, unstaged and staged diffs, and recent commit subjects.
-   - Preserve unrelated work.
-   - If unrelated changes are already staged, stop and ask.
-     - Do not include or unstage those changes.
+1. Inspect Git status, staged and unstaged diffs, and recent commit subjects.
+2. Identify the authorized files and preserve unrelated edits.
+3. When unrelated work is staged, stop before staging or committing.
+4. Locate the installed Pi package from the active executable and `pi --version`.
 
-2. **Locate the installed Pi package.**
-   - Check `pi --version`.
-   - Use the installed package, not a registry copy.
-   - **Windows**
-     - On Windows, run `where.exe pi`.
-     - Inspect its shim.
-     - The npm package is normally under `node_modules/@earendil-works/pi-coding-agent` beside the shim.
-   - Elsewhere, resolve the `pi` executable's symlink.
-   - If the interface has changed, read the installed documentation.
+On Windows, inspect the executable shim. Elsewhere, resolve its symlink.
+Use that installed package, not a registry copy or a hard-coded installation prefix.
 
-3. **Run the checks.**
-   - **Commands and timeouts**
-     - Run the bundled regression tests before the verifier.
-     - Use a 30-second outer timeout for the tests.
-     - Use an explicit outer timeout of at least 120 seconds for the verifier.
+## Verify the requested scope
 
-     ```text
-     node --test <this-skill-directory>/scripts/verify.test.ts
-     node <this-skill-directory>/scripts/verify.ts <installed-pi-package-directory>
-     ```
+Run commands from the agent directory. Replace the package placeholder with the verified installation path.
 
-   - **Verifier coverage**
-     - The verifier uses the installed schemas and dependencies.
-     - It checks skill discovery and the required global MCP-disable setting.
-     - It makes real model requests using existing private credentials.
-     - The verifier covers settings, models, and keybindings JSON, plus global skill discovery.
-   - **Read-only session**
-     - The disposable session starts with `--no-mcp`.
-     - It keeps the configured default model, thinking level, and global resources.
-     - It enables only `read` for safety.
-     - It must read a random marker from a temporary file.
-     - It must return that marker successfully within 90 seconds.
-   - **Network and privacy**
-     - Automatic catalog and update traffic is disabled.
-     - The model request remains enabled.
-     - No sessions or credentials are copied into Git.
-   - **Failure handling**
-     - Any schema, resource diagnostic, timeout, model, or tool failure blocks staging and committing.
-     - Do not weaken or skip these checks.
-     - For other changed formats, validate with the installed version's schemas or loaders before proceeding.
-     - Fix only authorized issues.
-     - After any content change, rerun verification.
+1. Run the saved offline workflow when maintained plugins, shared fixtures, skills, or host compatibility change.
 
-4. **Review files for staging.**
-   - **Review boundaries**
-     - Check the intended diff for credentials, tokens, private headers, and unrelated edits.
-     - Never include `auth.json`, sessions, caches, logs, or temporary artifacts.
-     - Keep `.gitignore` exceptions narrow for intentionally added files.
-   - **Explicit paths**
-     - Stage explicit reviewed paths with `git add -- <paths>`.
-     - Never use `git add .`, `git add -A`, or force-add ignored files.
+   ```text
+   node scripts/verify-extensions.ts <installed-pi-package-directory> offline
+   ```
 
-5. **Review and commit.**
-   - Review `git diff --cached`.
-   - Run `git diff --cached --check`.
-   - Commit verified intended changes with a short imperative subject matching repository history.
-     - Do not amend or bypass hooks.
-   - If there are no changes, report that verification passed and no commit was needed.
+2. Run the configuration verifier's regression tests before its live check.
 
-6. **Report the result.**
-   - Report the installed Pi version, schema results, live-session results, and final Git status.
-     - If a commit was created, include its hash and subject.
-   - Do not claim that the basic agent test verified interactive features or every extension integration.
+   ```text
+   node --test skills/sync-pi-config/scripts/verify.test.ts
+   node skills/sync-pi-config/scripts/verify.ts <installed-pi-package-directory>
+   ```
+
+Use a 30-second outer limit for unit tests, 180 seconds for offline integration, and 120 seconds for configuration verification.
+The offline workflow already includes the configuration verifier's regression tests; do not repeat them when unchanged.
+
+The configuration verifier checks installed JSON schemas, skill discovery, and the explicit global MCP-disable setting.
+Its real temporary Pi session uses the configured default model, reasoning level, authentication, and global resources.
+It must read a random marker and return it exactly within 90 seconds.
+This live check can incur model charges. It does not prove every extension feature works.
+
+### Additional live coverage
+
+When the change affects compaction, authentication, provider routing, or hosted search, select the relevant live check.
+Run it when the user authorized real model requests. Do not silently substitute a model to obtain success.
+
+```text
+node extensions/parallel-compact/verify-live.ts <installed-pi-package-directory> [provider/model]
+node extensions/web-search/verify-live.ts <installed-pi-package-directory> [provider/model]
+```
+
+Both commands use current Pi defaults unless an exact configured model override is supplied.
+The compaction check covers auto-compact, parallel-compact, token reset, persistence, and continuation.
+The search check requires the selected model's configured search capabilities and allowlist entry.
+A model change is not required merely because the search plugin is unavailable.
+Report unrelated or unrun live capabilities as `Not verified`; do not turn optional checks into universal blockers.
+
+### Failure and privacy rules
+
+- Treat failed required checks as blockers to saving the affected changes.
+- Do not weaken assertions, switch providers, or omit failing cases to obtain a pass.
+- Separate provider outages from code defects using existing offline checks.
+- Keep credentials, raw provider diagnostics, sessions, and temporary artifacts out of Git and reports.
+- Confirm owned temporary processes stop and temporary directories are removed.
+- After corrections, rerun affected checks. Do not repeat unrelated successful checks without new evidence.
+
+## Save when authorized
+
+1. Review the intended diff for secrets, unrelated edits, generated files, and missing tracked deliverables.
+2. Run `git diff --check`.
+3. Stage explicit reviewed paths with `git add -- <paths>`.
+4. Review `git diff --cached` and run `git diff --cached --check`.
+5. Create one local commit with a short imperative subject matching repository history.
+
+Never use broad staging, force-add ignored files, amend, or bypass hooks.
+When no change remains, report that no commit was needed.
+
+## Report
+
+State the named scope, installed Pi version, check commands and working directory, results, material limits, and cleanup status.
+Distinguish offline coverage, real model checks, and untested terminal or browser behavior.
+When a commit was authorized and created, report its hash and final Git status.

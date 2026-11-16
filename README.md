@@ -4,21 +4,13 @@ This directory is both Pi's default user configuration directory and a local Git
 
 ## Run
 
-Run `pi` from a project folder. Use `pi --continue` to resume its latest session, `/model` to select a model, `/thinking` to change reasoning effort, and `/compact` for manual compaction.
+Run `pi --no-mcp` from a project folder. Use `pi --no-mcp --continue` to resume its latest session.
+`/model` selects a model, `/thinking` changes reasoning effort, and `/compact` starts manual compaction.
 
-Pi 1.4.0 is installed globally with npm using `--ignore-scripts`.
-On this devbox, use the company registry instead of `pi update`.
-
-Query the available release, then install an exact version:
-
-```text
-npm view @earendil-works/pi-coding-agent version --registry=https://packagefeedproxy.microsoft.io/npm/ --fetch-retries=0 --fetch-timeout=20000
-npm install --global --prefix Q:/.tools/.npm-global --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.4.0 --registry=https://packagefeedproxy.microsoft.io/npm/ --fetch-retries=0 --fetch-timeout=20000
-```
-
-For a later upgrade, replace `1.4.0` with the query result.
-
-Git Bash is discovered automatically from the existing Git for Windows installation. No shell wrapper or environment-variable changes are needed.
+The maintained configuration targets Pi 1.4.0 and Node.js 22.19 or newer compatible runtimes.
+Pi is npm-managed. The active executable determines its installation prefix; no fixed drive or shell is required.
+The upgrade skills use the approved company registry and disable lifecycle scripts.
+They do not use `pi update` or modify installed code directly.
 
 ## MCP-free tooling
 
@@ -60,6 +52,12 @@ Native compaction makes model requests and can incur latency and cost.
 Work guards, cancellation handling, and failure-before-quit safeguards remain active.
 Pi's native transcript view handles compacted sessions; saved session files remain intact.
 
+The local [parallel-compact extension](extensions/parallel-compact/README.md) runs history and split-turn prefix summaries concurrently.
+It reuses native prompts, merge logic, usage accounting, and retained boundaries.
+It forwards configured timeouts and provider retry limits, including trusted project overrides.
+It is not fully transparent: header hooks, retry events, failure classification, and checkpoint metadata differ from native compaction.
+Single-summary and virtual-model paths remain native. The provider must accept concurrent requests.
+
 The local [token-usage item](extensions/token-usage/README.md) replaces the separate cost and cache displays. It reports `in`, `cr`, `cw`, `out`, and the input-token cache percentage in one item. Counts start after the latest successful manual or automatic compaction and survive reload and resume. The four raw fields remain separate; this item does not use native `token_in` or `token_out`.
 
 The local [web-search extension](extensions/web-search/README.md) registers and displays `web_run`.
@@ -85,7 +83,7 @@ Creating or reviewing it does not run upgrades or change Git history.
 
 ## Upgrade extensions
 
-Use the global [upgrade-pi-extensions skill](skills/upgrade-pi-extensions/README.md) with `/skill:upgrade-pi-extensions`. It automatically selects compatible stable releases for global npm extensions, keeps exact version pins, and verifies each upgrade. Failed candidates are replaced with the previous version before an older compatible candidate is tried. There are no approval or interactive-test questions. Verified settings changes receive one local commit; nothing is pushed.
+Use the global [upgrade-pi-extensions skill](skills/upgrade-pi-extensions/SKILL.md) with `/skill:upgrade-pi-extensions`. It automatically selects compatible stable releases for global npm extensions, keeps exact version pins, and verifies each upgrade. Failed candidates are replaced with the previous version before an older compatible candidate is tried. There are no approval or interactive-test questions. Verified settings changes receive one local commit; nothing is pushed.
 
 The skill reuses Pi's commands and the existing configuration verifier, without a separate planner or upgrade engine. Pi itself, project packages, Git/local packages, and local extension source files are outside scope. Models, credentials, resource filters, and unrelated settings are preserved. Browser and interactive feature behavior is not automatically verified.
 
@@ -97,7 +95,8 @@ The default theme is [ci_dark](themes/README.md), adapted from your iTerm palett
 
 `settings.json` selects `existing_gateway/gpt-6.1-sol` with `xhigh` reasoning effort for new sessions.
 Per-model settings and thinking maps restrict Astra to `high`, Sol to `xhigh`, and Terra to `max`.
-`models.json` uses the Responses API gateway at `http://127.0.0.1:48080`, with text/image input.
+`models.json` defines the Responses endpoint, authentication reference, and text/image support.
+Endpoint and credential configuration can differ between branches; the saved provider configuration is authoritative.
 Each model has a configured context window of 1,050,000 tokens and a maximum output allowance of 128,000 tokens.
 Independent web searches retain `low` effort without changing the main session's effort.
 Resumed sessions restore their saved model and effort; startup defaults do not replace session history.
@@ -107,7 +106,8 @@ Automatic compaction is enabled. Native `compaction.modelOverrides` entries rese
 On Pi 1.4.0, native summaries use the model's output limit.
 The reserve controls automatic compaction timing, not summary output length.
 
-The gateway must already be running, as it does for Codex. Its credential was copied once into Pi's private `auth.json`; it is excluded from Git. Rotate that credential separately if the server credential changes.
+The configured gateway must be reachable. Pi resolves authentication from the provider configuration, environment, or private credential storage.
+Credentials and sessions remain excluded from Git. Tests do not print secret values or require a fixed credential source.
 
 ## TypeScript development
 
@@ -123,6 +123,33 @@ Checking tools and declarations stay in disposable OS temporary directories.
 The runtime baseline follows Pi's minimum supported LTS, Node.js 22.19; compatible newer LTS versions remain supported.
 Global agent instructions own the coding policy and reference [TYPESCRIPT.md](TYPESCRIPT.md) for detailed procedures.
 README files describe the configuration; agents do not depend on them for instructions.
+
+## Reusable verification
+
+Run commands from this agent directory, using the active installed Pi package path:
+
+```text
+node scripts/verify-extensions.ts <installed-pi-package-directory> offline
+node themes/verify.ts <installed-pi-package-directory>
+node skills/sync-pi-config/scripts/verify.ts <installed-pi-package-directory>
+```
+
+Offline plugin tests use controlled responses and synthetic models. They need no service credentials or external model requests.
+They cover actual idle-to-parallel triggering, pre-quit ordering, failures, cancellation, single-summary delegation, usage, search controls, and rendering.
+The configuration verifier makes a real read-only request with the configured default model and global resources.
+
+Feature-specific live checks are optional and can incur model charges:
+
+```text
+node scripts/verify-extensions.ts <installed-pi-package-directory> live [provider/model]
+```
+
+Live checks use Pi's configured default model, reasoning level, and authentication unless an exact model override is supplied.
+They do not substitute another model when a capability is unavailable.
+The combined compaction test covers auto-compact, parallel-compact, and token-usage.
+The web-search test requires the configured search provider's API, allowlist, hosted search, and input-count capabilities.
+The compaction clock is simulated; these checks do not wait through real terminal inactivity or test every browser workflow.
+MCP remains disabled and temporary state is removed after each check.
 
 ## Instructions and version control
 
