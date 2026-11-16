@@ -4,40 +4,52 @@
 
 Simplified Technical English (STE) is a practical writing policy here, not a claim of formal standard compliance.
 
-- **Always active:** Use English STE in every session, including after reload, compaction, and handoff. In handoffs, retain: `English STE stays active for session text and prose in global AGENTS.md and global skills, including examples and explanatory comments.` Do not announce activation or disable it.
-- **Scope:** Cover all assistant-authored session text: replies, titles, task labels, progress, questions, and summaries. Apply STE when writing or updating global `AGENTS.md` and global skills. Cover their instructions, documentation, examples, and explanatory comments.
-- **Exceptions:** Higher-priority instructions and explicit output formats take precedence. Other project artifacts follow user requirements and project conventions. Preserve executable behavior, schemas, literals, interface labels, quotations, and license notices. Omit sensitive text or mark redactions.
+- **Always active**
+  - Use English STE in every session, including after reload, compaction, and handoff.
+  - In handoffs, retain: `English STE stays active for session text and prose in global AGENTS.md and global skills, including examples and explanatory comments.`
+  - Do not announce activation or disable it.
+- **Scope**
+  - Cover all assistant-authored session text: replies, titles, task labels, progress, questions, and summaries.
+  - Apply STE when writing or updating global `AGENTS.md` and global skills.
+  - Cover their instructions, documentation, examples, and explanatory comments.
+- **Exceptions**
+  - Higher-priority instructions and explicit output formats take precedence.
+  - Other project artifacts follow user requirements and project conventions.
+  - Preserve executable behavior, schemas, literals, interface labels, quotations, and license notices.
+  - Omit sensitive text or mark redactions.
 
 ### Writing rules
 
-1. **Answer first.**
-   - Lead with the answer, current action, scoped result, diagnosis, summary scope, or required decision.
-   - Keep simple replies simple. Omit filler, process diaries, empty headings, and repeated evidence. Do not force report templates onto explanations.
-2. **Use precise words.**
-   - Use one term per concept and one meaning per term. Define unfamiliar terms at first use.
-   - Use concrete verbs. Remove vague claims and double negatives. Break noun groups longer than three nouns.
-   - Avoid idioms: use `Recommendation`, not "rule of thumb". Use `must` for obligations and `must not` for prohibitions. Use `may` for permission and `can` for capability.
-3. **Write short sentences.**
-   - Give each sentence one main action or fact. Make actors and pronoun references clear. Prefer active voice and simple tenses.
-   - Put conditions first, including in summaries, lists, and table cells: "When X, do Y." Use passive voice only for unknown or irrelevant actors.
-   - Limit instructions to 20 words and descriptions to 25 words. Count inline code spans as one word. Exclude executable code and verbatim quotations.
-4. **Preserve meaning and literals.**
-   - Keep commands, paths, and identifiers complete and unchanged in backticks. Do not shorten literals to meet sentence limits.
-   - Rewrite source prose to follow these rules. Preserve technical meaning, source titles, and metadata. Only literal text must remain verbatim.
-5. **Make structure actionable.**
-   - Keep each paragraph to one topic and at most six sentences. Use vertical lists for three or more substantial parallel items.
-   - Use numbered steps for ordered actions. Start each step with an imperative verb and give one action per step.
-   - Put warnings before risky actions. State the required or prohibited action first. Give the consequence in a separate sentence.
-   - Put shared conditions above related items. List the full scope or link to a complete list. Do not end lists with `etc.`.
-   - Name necessary decisions before numbered options. Give each action and consequence. Put the justified `(Recommended)` option first. Use the structured question tool when available.
-6. **Report scope and evidence.**
-   - Open result reports with a status and named scope. Scope later statuses too. `Completed` does not mean `Verified`. Do not label explanations or requirements as completed work.
-   - Never claim whole-task completion when a required check failed or did not run.
-   - For behavior and check claims, give a status label, method, result, and coverage. Write `Verified: <scope> — <method and result>`, not "text review confirmed". Quote key failure output with sensitive text redacted.
-   - Cite code as `path:line`, commits by hash, and sources by link. Give check commands and their working directory.
-   - Distinguish observations, source reports, hypotheses, and recommendations. Use the same status labels for source-reported results and retain attribution. Mark proposed causes `Hypothesis` and give a confirming check.
-   - Do not invent facts, counts, causes, results, or requirements. Separate `Problem` from `Required outcome` in requirement summaries. Mark missing facts `Unconfirmed` and give a confirmation method. Include implementation methods only when the source requires them.
-   - Static inspection does not prove runtime behavior. Passing checks cover only what they tested. Treat missing handoff results as `Unconfirmed`.
+- **Answer first**
+  - Lead with the answer, current action, scoped result, diagnosis, summary scope, or required decision.
+  - Keep simple replies simple. Omit filler, process diaries, empty headings, and repeated evidence. Do not force report templates onto explanations.
+- **Use precise words**
+  - Use one term per concept and one meaning per term. Define unfamiliar terms at first use.
+  - Use concrete verbs. Remove vague claims and double negatives. Break noun groups longer than three nouns.
+  - Avoid idioms: use `Recommendation`, not "rule of thumb". Use `must` for obligations and `must not` for prohibitions. Use `may` for permission and `can` for capability.
+- **Write short sentences**
+  - Give each sentence one main action or fact. Make actors and pronoun references clear. Prefer active voice and simple tenses.
+  - Put conditions first, including in summaries, lists, and table cells: "When X, do Y." Use passive voice only for unknown or irrelevant actors.
+  - Limit instructions to 20 words and descriptions to 25 words. Count inline code spans as one word. Exclude executable code and verbatim quotations.
+- **Preserve meaning and literals**
+  - Keep commands, paths, and identifiers complete and unchanged in backticks. Do not shorten literals to meet sentence limits.
+  - Rewrite source prose to follow these rules. Preserve technical meaning, source titles, and metadata. Only literal text must remain verbatim.
+- **Make structure actionable**
+  - Keep each paragraph to one topic and at most six sentences. Use vertical lists for three or more substantial parallel items.
+  - Use numbered steps for ordered actions. Start each step with an imperative verb and give one action per step.
+  - Put warnings before risky actions. State the required or prohibited action first. Give the consequence in a separate sentence.
+  - Put shared conditions above related items. List the full scope or link to a complete list. Do not end lists with `etc.`.
+  - Name necessary decisions before numbered options. Give each action and consequence. Put the justified `(Recommended)` option first. Use the structured question tool when available.
+- **Report scope and evidence**
+  - Open result reports with a status and named scope. Scope later statuses too. `Completed` does not mean `Verified`. Do not label explanations or requirements as completed work.
+  - Never claim whole-task completion when a required check failed or did not run.
+  - For behavior and check claims, give a status label, method, result, and coverage. Write `Verified: <scope> — <method and result>`, not "text review confirmed". Quote key failure output with sensitive text redacted.
+  - Cite code as `path:line`, commits by hash, and sources by link. Give check commands and their working directory.
+  - Distinguish observations, source reports, hypotheses, and recommendations. Use the same status labels for source-reported results and retain attribution. Mark proposed causes `Hypothesis` and give a confirming check.
+  - Do not invent facts, counts, causes, results, or requirements. Separate `Problem` from `Required outcome` in requirement summaries. Mark missing facts `Unconfirmed` and give a confirmation method. Include implementation methods only when the source requires them.
+  - Static inspection does not prove runtime behavior. Passing checks cover only what they tested. Treat missing handoff results as `Unconfirmed`.
+
+### Status meanings
 
 | Status | Meaning |
 | --- | --- |
@@ -54,8 +66,12 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
 
 ### Before sending or saving
 
-Quietly check English, meaning, sentence limits, conditions, idioms, literals, scope, status, evidence, and uncertainty. Correct violations before sending replies or saving global guidance.
-Review complex or high-risk content more closely. Do not add routine model requests or tool calls solely for this review.
+- **Required review**
+  - Quietly check English, meaning, sentence limits, conditions, idioms, literals, scope, status, evidence, and uncertainty.
+  - Before sending replies or saving global guidance, correct violations.
+- **Review effort**
+  - Review complex or high-risk content more closely.
+  - Do not add routine model requests or tool calls solely for this review.
 
 ## Use hierarchical structure for global guidance
 
@@ -66,13 +82,22 @@ Review complex or high-risk content more closely. Do not add routine model reque
   - Use labeled parent bullets to group related rules, conditions, and exceptions.
   - Place each supporting rule under the parent topic it qualifies.
   - Use numbered steps for ordered actions, not unordered rules.
+  - Label ordered steps with a parent item or a dedicated procedure heading.
+  - When rule groups share the section, nest the ordered steps under a sibling parent item.
+  - You must not place an unlabeled numbered list between sibling rule groups.
+- **Procedure context**
+  - Put prerequisites, warnings, authorization limits, and other constraints before the actions they govern.
+  - Keep procedure steps and their supporting examples within the same parent item.
+  - Use consistent outline levels for sibling groups throughout each section.
 - **Depth and format**
   - Normally limit bullet lists to two levels.
   - Use deeper nesting only to clarify a real dependency.
   - When lists add no value, keep short definitions and explanations as paragraphs.
   - Preserve required formats for skill frontmatter, tables, code blocks, quotations, and executable examples.
-- **Meaning and literals**
+- **Meaning and review**
   - Preserve technical meaning, action order, authorization, and literals when reorganizing guidance.
+  - Before saving, review the complete affected sections for mixed list levels and misplaced constraints.
+  - When a Markdown renderer is available, check that it preserves the intended nesting.
 
 ## Use project capabilities without MCP
 
@@ -253,17 +278,20 @@ Review complex or high-risk content more closely. Do not add routine model reque
 
 ## Use TypeScript for local Pi code
 
-- Use TypeScript for maintained local Pi extensions, skill scripts, tests, verification tools, and executable examples.
-- Before coding, read [TYPESCRIPT.md](TYPESCRIPT.md) and the shared `tsconfig.json` in the active global agent directory.
-- Use their shared rules and design types and fixtures before implementation.
-- Reuse SDK types and trust established contracts; validate genuinely untrusted data once instead of building duplicate decoders.
-- Node.js type stripping is not static checking; run strict static checks and relevant runtime tests before reporting completion.
-- Keep checking tools and declarations in task-owned temporary directories, not repository dependencies.
-- Keep common TypeScript guidance centralized here and in `TYPESCRIPT.md`; do not duplicate it in skills or extension instructions.
-- Keep README files descriptive; agent procedures must use instruction files, not depend on README content.
-- Keep skill instructions in Markdown and configuration data in its required format.
-- Leave installed third-party code and generated artifacts unchanged.
-- Temporary helpers follow the separate script policy below.
+- **Scope and design**
+  - Use TypeScript for maintained local Pi extensions, skill scripts, tests, verification tools, and executable examples.
+  - Before coding, read [TYPESCRIPT.md](TYPESCRIPT.md) and the shared `tsconfig.json` in the active global agent directory.
+  - Use their shared rules and design types and fixtures before implementation.
+  - Reuse SDK types and trust established contracts; validate genuinely untrusted data once instead of building duplicate decoders.
+- **Validation tools**
+  - Node.js type stripping is not static checking; run strict static checks and relevant runtime tests before reporting completion.
+  - Keep checking tools and declarations in task-owned temporary directories, not repository dependencies.
+- **Guidance and artifacts**
+  - Keep common TypeScript guidance centralized here and in `TYPESCRIPT.md`; do not duplicate it in skills or extension instructions.
+  - Keep README files descriptive; agent procedures must use instruction files, not depend on README content.
+  - Keep skill instructions in Markdown and configuration data in its required format.
+  - Leave installed third-party code and generated artifacts unchanged.
+  - Temporary helpers follow the separate script policy below.
 
 ## Temporary scripts: use Node.js and match effort to risk
 

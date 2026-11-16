@@ -25,14 +25,14 @@ A direct service API is the service's application programming interface, not an 
 
 ## 1. Define the operation
 
-1. Identify the target resource.
-2. Define the requested action and read or write scope.
-3. Confirm authorization for the action.
-4. Identify side effects and a concrete success check.
-
 - **Discovery scope**
-  - Limit discovery to that operation.
+  - Limit discovery to the requested operation.
   - You must not replace restricted access with broader access or expand the user's request.
+- **Procedure**
+  1. Identify the target resource.
+  2. Define the requested action and read or write scope.
+  3. Confirm authorization for the action.
+  4. Identify side effects and a concrete success check.
 
 ## 2. Read static evidence
 
@@ -57,11 +57,6 @@ Static evidence comes from documentation or source inspection, not a live servic
   - Prefer an existing project command or script.
   - Otherwise, use a documented library or a direct service API that does not use MCP.
   - An HTTP request to an MCP endpoint remains prohibited.
-
-1. Map the required inputs to the selected interface.
-2. Check outputs, authentication, permissions, and side effects against the requested operation.
-3. Select one route that meets the task requirements.
-
 - **Authentication and authorization**
   - Reuse approved authentication.
   - You must not copy secrets from another agent's configuration.
@@ -70,18 +65,21 @@ Static evidence comes from documentation or source inspection, not a live servic
 - **Implementation limits**
   - Follow the global rules for scripts, registries, network access, timeouts, and cleanup.
   - You must not build a general adapter framework or a catalog of guessed interfaces.
+- **Procedure**
+  1. Map the required inputs to the selected interface.
+  2. Check outputs, authentication, permissions, and side effects against the requested operation.
+  3. Select one route that meets the task requirements.
 
 ## 4. Verify and execute
 
 - **Before write operations**
   - Before a write operation, confirm the target, authorized action, and consequence.
   - When an existing dry run can materially reduce risk, use it first.
-
-1. Compare the selected route with documented behavior or source code.
-2. When authorized, run the smallest benign check that establishes the required capability.
-3. Execute the requested operation with bounded output and suitable cancellation.
-4. Check the result against the success criteria.
-
+- **Procedure**
+  1. Compare the selected route with documented behavior or source code.
+  2. When authorized, run the smallest benign check that establishes the required capability.
+  3. Execute the requested operation with bounded output and suitable cancellation.
+  4. Check the result against the success criteria.
 - **Evidence limits**
   - A zero exit code alone does not establish that the operation met its requirements.
   - Static inspection does not prove runtime behavior.

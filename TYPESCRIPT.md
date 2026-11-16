@@ -68,14 +68,15 @@ Passing runtime tests and passing static checks cover different requirements; ne
 
 ### Run the checking procedure
 
-1. Create a uniquely named, task-owned OS temporary directory.
-2. Install the Go-based TypeScript compiler and baseline Node.js declarations there, with lifecycle scripts disabled.
-3. Resolve required host declarations from installed Pi package metadata, including hoisted dependencies.
-4. Create a temporary configuration that extends the shared `tsconfig.json` without weakening its rules.
-5. Set temporary declaration paths and include all maintained source, tests, verifiers, fixtures, and temporary TypeScript helpers.
-6. Run the compiler with `noEmit` and `erasableSyntaxOnly` enabled.
-7. Run the relevant runtime tests against the actual implementation.
-8. Remove the owned directory in `finally`, including after setup, installation, or checking failures.
+- **Procedure**
+  1. Create a uniquely named, task-owned OS temporary directory.
+  2. Install the Go-based TypeScript compiler and baseline Node.js declarations there, with lifecycle scripts disabled.
+  3. Resolve required host declarations from installed Pi package metadata, including hoisted dependencies.
+  4. Create a temporary configuration that extends the shared `tsconfig.json` without weakening its rules.
+  5. Set temporary declaration paths and include all maintained source, tests, verifiers, fixtures, and temporary TypeScript helpers.
+  6. Run the compiler with `noEmit` and `erasableSyntaxOnly` enabled.
+  7. Run the relevant runtime tests against the actual implementation.
+  8. Remove the owned directory in `finally`, including after setup, installation, or checking failures.
 
 ### Configure and report checks
 
