@@ -57,6 +57,23 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
 Quietly check English, meaning, sentence limits, conditions, idioms, literals, scope, status, evidence, and uncertainty. Correct violations before sending replies or saving global guidance.
 Review complex or high-risk content more closely. Do not add routine model requests or tool calls solely for this review.
 
+## Use hierarchical structure for global guidance
+
+- **Scope**
+  - Apply this structure when writing or updating global `AGENTS.md`, global skills, and global `TYPESCRIPT.md`.
+- **Headings and lists**
+  - Use headings to separate major topics.
+  - Use labeled parent bullets to group related rules, conditions, and exceptions.
+  - Place each supporting rule under the parent topic it qualifies.
+  - Use numbered steps for ordered actions, not unordered rules.
+- **Depth and format**
+  - Normally limit bullet lists to two levels.
+  - Use deeper nesting only to clarify a real dependency.
+  - When lists add no value, keep short definitions and explanations as paragraphs.
+  - Preserve required formats for skill frontmatter, tables, code blocks, quotations, and executable examples.
+- **Meaning and literals**
+  - Preserve technical meaning, action order, authorization, and literals when reorganizing guidance.
+
 ## Use project capabilities without MCP
 
 - **Prohibited access**
