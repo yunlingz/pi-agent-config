@@ -154,25 +154,109 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
 
 ## Inspect code and choose tools
 
+### Follow guidance and limit scope
+
 - **Applicable guidance**
   - Follow applicable global, project, and directory instructions.
   - Load referenced procedures only when relevant.
   - Check instructions in each newly relevant directory before editing its files.
+- **Tool availability**
+  - Follow currently exposed tool definitions, not assumptions from earlier turns.
+  - Apply CodeAnchor-specific rules only while the relevant CodeAnchor tools are available.
+  - When AST tools are unavailable, use built-in `grep`, `find`, `ls`, `read`, and `edit` as appropriate.
+  - When dedicated tools are unavailable or insufficient, use `bash` with suitable commands.
+  - When CodeAnchor is disabled, use built-in `read` and `edit` contracts without hashline syntax.
+  - Do not enable CodeAnchor merely to satisfy a tool preference.
 - **Focused investigation**
-  - Search narrowly with `rg` or `rg --files`.
-  - Read relevant sections. Batch independent reads when practical.
+  - Search the smallest relevant scope first.
   - Expand exploration only when evidence or missing requirements justify it.
-  - Before editing unfamiliar code, read applicable instructions, implementation, callers, tests, and usage examples.
+  - Before editing unfamiliar code, inspect applicable instructions, implementation, callers, tests, and usage examples.
   - Follow actual data flow and existing conventions.
+  - Choose tools for useful evidence, not tool-call counts or a fixed sequence.
+
+### Discover files and inspect content
+
+- **File discovery**
+  - Use `ls` to inspect immediate directory contents.
+  - Use `find` to locate files by filename or path glob.
+  - When relevant paths are known, search or read them directly.
+  - When discovery tools lack required options or fail, use `bash` with `rg --files` or another suitable command.
+- **File inspection**
+  - Use `read` to inspect implementation details, control flow, and surrounding context.
+  - When CodeAnchor is enabled, `read` provides hashline anchors and can summarize supported code.
+  - Re-read omitted ranges when their contents are needed. Never infer hidden source from a summary.
+  - Batch independent reads when practical.
+
+### Select structural or text search
+
+- **Structural search**
+  - When `ast_grep` is available and supports the language and syntax, prefer it for structural code questions.
+  - Apply this preference during explanations, investigations, reviews, and implementation.
+  - Use structural patterns for calls, constructors, imports, declarations, assignments, and repeated syntax.
+  - Use captures when they express the intended structure accurately.
+  - After finding structural connections, use `read` to inspect branches, arguments, and data transformations.
+  - Do not choose text search merely because an identifier can also appear in text matches.
+- **Text search**
+  - Prefer built-in `grep` for prose, comments, literal strings, configuration keys, log messages, and regular-expression searches.
+  - When AST search is unsupported or unreliable, use `grep` for code search.
+  - When `grep` is unavailable or lacks required options, use `bash` with `rg`.
+  - For committed files outside the checkout, use Git searches such as `git grep`.
+- **Search coverage and recovery**
+  - Use active AST tool descriptions to determine grammar support.
+  - When support is unclear, inspect bundled metadata rather than guessing.
+  - For mixed-language directories, use suitable file globs or automatic language detection.
+  - Do not force one grammar onto unrelated files.
+  - When expected AST matches are absent, check the path, language, and pattern.
+  - Try a focused correction when useful. Do not repeat an unchanged failing query.
+  - When AST parsing, matching, or tool execution remains unreliable, switch to text search and inspect relevant results.
+  - Treat AST matches as syntax evidence, not type-resolved references or complete call graphs.
+  - Inspect aliases, inheritance, dynamic dispatch, and configuration when they affect the result.
+  - Do not treat zero matches as proof of absence when coverage is uncertain.
+  - State material search limitations when they affect conclusions.
+
+### Select structural or hashline editing
+
+- **Editing model**
+  - When CodeAnchor is enabled, `edit` uses snapshot-checked hashline targeting; `ast_edit` uses structural matching and staged rewrites.
+  - When `ast_edit` is available, prefer it when syntax accurately defines both the intended targets and transformation.
+  - Otherwise, use hashline `edit` for changes defined by location and surrounding context.
+  - Select the smallest correct change. Match count alone must not determine the tool.
+  - Use `ast_grep`, not `ast_edit`, for read-only exploration.
+- **Structural changes**
+  - Read relevant implementations before staging an `ast_edit` rewrite.
+  - For unfamiliar or broad transformations, inspect the target pattern with `ast_grep` first.
+  - Restrict paths and captures to the authorized scope.
+  - Do not assume identical names identify the same symbol.
+  - Review every affected location, replacement, comment, and formatting change in the preview.
+  - When a preview includes unintended changes, narrow its pattern or paths.
+  - Apply a reviewed preview through `write` to `xd://resolve`; discard it through `write` to `xd://reject`.
+  - Provide a reason when applying or discarding a preview.
+  - When source changes invalidate a preview, inspect current source and generate a new preview.
+- **Context-specific changes**
+  - Use hashline `edit` for local control-flow changes, position-specific statements, prose, comments, and exact-line changes.
+  - Use `read` to obtain current snapshot tags and source line numbers before hashline editing.
+  - Never invent anchors or omitted source. When anchors are stale, re-read the affected range.
+  - Batch related operations under the appropriate file header.
+  - When AST rewriting remains unreliable or unsupported, fall back to `read` plus hashline `edit`.
+  - Apply or discard a pending AST preview before editing its affected files through another tool.
+- **Writes and validation**
+  - Use `write` for new files or justified complete rewrites, not to bypass failed edit checks.
+  - Do not use shell replacement commands to bypass AST or hashline safeguards.
+  - Review the resulting diff and run applicable checks after either editing method.
+  - Successful matching or edit application does not prove behavioral correctness.
+
+### Reuse workflows and inspect evidence
+
 - **Tools and workflows**
-  - When choosing tools, follow applicable safety and runtime restrictions.
-  - Reuse project scripts, command-line tools, configured tools, and existing workflows.
-  - When existing tools and workflows meet the requirements, do not introduce alternatives.
-  - If existing tools or workflows cannot meet the requirements, explain the limitation before proposing a change.
+  - Follow applicable safety and runtime restrictions.
+  - Reuse project scripts, configured tools, and existing workflows.
+  - Use `bash` for builds, tests, Git, and operations that dedicated tools cannot perform adequately.
+  - When existing workflows meet the requirements, do not introduce alternatives.
+  - When existing tools cannot meet the requirements, explain the limitation before proposing a change.
   - Learn unfamiliar usage from help or documentation before guessing commands.
   - For new temporary helpers, follow the Node.js rules below.
 - **Evidence and history**
-  - When explaining behavior or code history, inspect targeted Git history and linked issues or pull requests when relevant.
+  - When explaining behavior or history, inspect targeted Git history and linked issues or pull requests when relevant.
   - Base requested work summaries on the relevant history and date range.
 
 ## Keep implementation simple

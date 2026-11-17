@@ -66,6 +66,7 @@
 !/extensions/code-anchor/file-tracking.test.ts
 !/extensions/code-anchor/extension.ts
 !/extensions/code-anchor/index.ts
+!/extensions/code-anchor/render.ts
 !/extensions/code-anchor/core-types.ts
 !/extensions/code-anchor/wasm-runtime.ts
 !/extensions/code-anchor/wasm.test.ts

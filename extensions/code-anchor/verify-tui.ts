@@ -38,6 +38,8 @@ async function main(): Promise<void> {
     await symlink(root, join(agent, "extensions", "code-anchor"), process.platform === "win32" ? "junction" : "dir");
     await mkdir(workspace);
     await writeFile(join(workspace, "fixture.ts"), "// terminal fixture\nconsole.log(before);\n");
+    const foldedSource = Array.from({ length: 40 }, (_, index) => `console.log("${index === 39 ? "FOLD_UI_TAIL" : `row_${index}`} ${"界".repeat(20)}");`).join("\n") + "\n";
+    await writeFile(join(workspace, "fold.ts"), foldedSource);
     await writeFile(join(agent, "settings.json"), JSON.stringify({
       packages: [], extensions: ["-builtin:mcp"], defaultProvider: "code-anchor-tui-fixture", defaultModel: "fixture",
       compaction: { enabled: false }, cacheWarming: "off", quietStartup: true, retry: { enabled: false },
@@ -108,6 +110,19 @@ async function main(): Promise<void> {
     await prompt("hashline");
     assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nconsole.log(after);\n");
     assert(visible().includes("fixture.ts"));
+    output = "";
+    await prompt("fold");
+    assert(!visible().includes("FOLD_UI_TAIL"), "Collapsed read/edit must not display distant source rows");
+    assert(visible().includes("edit fold.ts"), "The hashline edit header must show its target path");
+    output = "";
+    child.write("\x0f");
+    assert.equal((await checkpoint("expanded")).expanded, true);
+    await wait("expanding actual read/edit results", () => visible().includes("FOLD_UI_TAIL"));
+    output = "";
+    child.write("\x0f");
+    assert.equal((await checkpoint("collapsed")).expanded, false);
+    assert(!visible().includes("FOLD_UI_TAIL"), "The expansion shortcut must collapse read/edit output again");
+    assert.equal(await readFile(join(workspace, "fold.ts"), "utf8"), foldedSource.replaceAll("console.log", "console.warn"));
     await prompt("preview");
     assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nconsole.log(after);\n");
     await prompt("resolve");
@@ -138,7 +153,7 @@ async function main(): Promise<void> {
     await wait("waiting for graceful terminal shutdown", () => exit !== undefined);
     assert.equal(exit?.exitCode, 0);
     assert((await trace()).some(event => event.event === "session_shutdown" && event.reason === "quit"));
-    console.log("PASS: actual Pi TUI, automatic CodeAnchor discovery, default-on activation, keyboard commands, hashline and AST tools, Powerline on/off, reload, built-in restoration, resize, re-enable, and graceful shutdown; zero network requests");
+    console.log("PASS: actual Pi TUI, automatic discovery, compact read/edit, keyboard expand/collapse, hashline and AST tools, Powerline on/off, reload, built-in restoration, resize, re-enable, and graceful shutdown; zero network requests");
   } catch (error) {
     console.error(JSON.stringify({ phase, terminalBytes: bytes, exitCode: exit?.exitCode, failure: error instanceof assert.AssertionError ? error.message : "Terminal verification failed; diagnostics withheld" }));
     throw error;

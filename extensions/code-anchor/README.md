@@ -79,6 +79,17 @@ Local read paths accept single ranges, range lists, tails, open ranges, and `:ra
 Bare code reads use the pinned structural summarizer for eligible long files.
 Summary omissions are not counted as displayed edit anchors; the footer gives concrete ranges to re-read.
 
+Tool metadata favors AST search for supported code structures and hashline edits for context-specific changes.
+Syntax-defined transformations use staged AST rewrites, including single-occurrence changes.
+Pi's `grep`, `find`, and `ls` complement these tools; `bash` remains available for missing capabilities and failures.
+The extension does not block or rewrite shell commands to enforce tool preferences.
+When CodeAnchor is disabled, its tool-specific prompt guidelines leave Pi's prompt with the overridden definitions.
+Native Pi renderers handle reads and ordinary writes, including their collapsed and expanded views.
+Hashline edits, AST results, and AST resolution use ten-row previews with Pi's expansion shortcut.
+Preview limits count wrapped terminal rows; expanded views retain the complete tool result.
+Hashline edit headers show target paths instead of the native edit tool's incompatible argument placeholder.
+UI folding does not change model-facing content, anchors, file tracking, or existing tool-output limits.
+
 - `/code-anchor` toggles the extension.
 - `/code-anchor on`, `/code-anchor off`, and `/code-anchor status` are explicit forms.
 - New sessions default to on. The active branch stores the preference across reloads.
@@ -107,6 +118,9 @@ JavaScript and JSX share one grammar. TypeScript and TSX have separate grammars.
 CMake detection includes `CMakeLists.txt` and `.cmake` files.
 Make detection includes `Makefile`, `makefile`, `GNUmakefile`, `.mk`, and `.mak` files.
 JSON5, JSONC, SCSS, and all other unlisted grammars are excluded.
+Both AST tool descriptions derive their grammar names and count from `grammars.json` at extension load.
+The `ast_grep.lang` description explains explicit grammar selection and automatic filename detection.
+Aliases remain accepted; grammar support does not guarantee every dialect or syntax version parses.
 Unsupported text files still support ordinary reads and hashline edits; AST summaries fall back to ordinary text.
 Ordinary grep remains available. Unsupported files are not silently routed to CSS or JSON parsers.
 Bash extension aliases do not guarantee complete support for every shell dialect.
@@ -143,6 +157,7 @@ node scripts/verify-extensions.ts <installed-pi-package-directory> offline
 node extensions/code-anchor/verify-integration.ts <installed-pi-package-directory>
 node extensions/code-anchor/verify-live.ts <installed-pi-package-directory>
 node extensions/code-anchor/verify-live-session.ts <installed-pi-package-directory>
+node extensions/code-anchor/scripts/verify-tool-selection.ts <installed-pi-package-directory>
 node extensions/code-anchor/verify-tui.ts <installed-pi-package-directory> <node-pty-package-directory> <powerline-package-directory>
 node extensions/code-anchor/verify-performance.ts 100
 node extensions/code-anchor/verify-performance.ts 1000
@@ -171,6 +186,10 @@ It also performs native manual compaction, checks persisted file metadata, reloa
 Its temporary project settings retain no recent history for that compaction case; global settings remain unchanged.
 Live tests use temporary fixtures and retain the configured provider, model, and reasoning level.
 They do not certify every model-generated edit.
+`scripts/verify-tool-selection.ts` checks natural tool choice with all seven selected built-ins and both AST tools available.
+Its task prompts do not name tools; assertions cover discovery, structural/text search, unsupported syntax, both editing methods, and disabled AST fallback.
+The integration verifier also renders actual tool results through Pi's renderer resolution and tool component.
+It checks folding, expansion, resizing, wide characters, target headers, and unchanged model-facing results at 24, 60, and 120 columns.
 
 `verify-tui.ts` starts the actual Pi CLI through an existing `node-pty` installation and loads the installed Powerline extension.
 The test uses automatic CodeAnchor discovery, isolated settings, synthetic source, a local fixture provider, and no credentials or network requests.

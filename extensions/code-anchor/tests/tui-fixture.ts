@@ -14,6 +14,7 @@ export interface TuiTrace {
   name?: string;
   error?: boolean;
   text?: string;
+  expanded?: boolean;
 }
 
 export default function registerTuiFixture(pi: ExtensionAPI): void {
@@ -42,6 +43,16 @@ export default function registerTuiFixture(pi: ExtensionAPI): void {
         call = { id: `${phase}-${results.length}`, name, arguments: args };
       };
       switch (phase) {
+        case "fold":
+          if (results.length === 0) plan("read", { path: "fold.ts" });
+          else if (results.length === 1) {
+            const text = results[0]?.content.filter(block => block.type === "text").map(block => block.text).join("\n") ?? "";
+            const tag = /\[fold\.ts#([0-9A-F]{4})\]/u.exec(text)?.[1];
+            assert(tag);
+            const rows = Array.from({ length: 40 }, (_, index) => `+console.warn("${index === 39 ? "FOLD_UI_TAIL" : `row_${index}`} ${"界".repeat(20)}");`);
+            plan("edit", { input: `[fold.ts#${tag}]\nPUT 1.=40:\n${rows.join("\n")}` });
+          }
+          break;
         case "hashline":
           if (results.length === 0) plan("read", { path: "fixture.ts" });
           else if (results.length === 1) {
@@ -93,7 +104,7 @@ export default function registerTuiFixture(pi: ExtensionAPI): void {
   pi.registerCommand("terminal-checkpoint", {
     description: "Record the isolated terminal tool selection",
     handler: async (args, ctx) => {
-      record({ event: "checkpoint", phase: args.trim(), mode: ctx.mode, tools: pi.getActiveTools() });
+      record({ event: "checkpoint", phase: args.trim(), mode: ctx.mode, tools: pi.getActiveTools(), expanded: ctx.ui.getToolsExpanded() });
       ctx.ui.notify(`CHECKPOINT_${args.trim()}`, "info");
     },
   });
