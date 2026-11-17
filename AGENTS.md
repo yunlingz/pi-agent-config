@@ -164,7 +164,7 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
   - Follow currently exposed tool definitions, not assumptions from earlier turns.
   - Apply CodeAnchor-specific rules only while the relevant CodeAnchor tools are available.
   - When AST tools are unavailable, use built-in `grep`, `find`, `ls`, `read`, and `edit` as appropriate.
-  - When dedicated tools are unavailable or insufficient, use `bash` with suitable commands.
+  - When dedicated tools are unavailable or insufficient, use an available command-execution tool.
   - When CodeAnchor is disabled, use built-in `read` and `edit` contracts without hashline syntax.
   - Do not enable CodeAnchor merely to satisfy a tool preference.
 - **Focused investigation**
@@ -180,7 +180,7 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
   - Use `ls` to inspect immediate directory contents.
   - Use `find` to locate files by filename or path glob.
   - When relevant paths are known, search or read them directly.
-  - When discovery tools lack required options or fail, use `bash` with `rg --files` or another suitable command.
+  - When discovery tools lack required options or fail, use `rg --files` through an available command-execution tool.
 - **File inspection**
   - Use `read` to inspect implementation details, control flow, and surrounding context.
   - When CodeAnchor is enabled, `read` provides hashline anchors and can summarize supported code.
@@ -199,7 +199,7 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
 - **Text search**
   - Prefer built-in `grep` for prose, comments, literal strings, configuration keys, log messages, and regular-expression searches.
   - When AST search is unsupported or unreliable, use `grep` for code search.
-  - When `grep` is unavailable or lacks required options, use `bash` with `rg`.
+  - When `grep` is unavailable or lacks required options, run `rg` through an available command-execution tool.
   - For committed files outside the checkout, use Git searches such as `git grep`.
 - **Search coverage and recovery**
   - Use active AST tool descriptions to determine grammar support.
@@ -241,7 +241,7 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
   - Apply or discard a pending AST preview before editing its affected files through another tool.
 - **Writes and validation**
   - Use `write` for new files or justified complete rewrites, not to bypass failed edit checks.
-  - Do not use shell replacement commands to bypass AST or hashline safeguards.
+  - Do not use scripts or command tools to bypass AST or hashline safeguards.
   - Review the resulting diff and run applicable checks after either editing method.
   - Successful matching or edit application does not prove behavioral correctness.
 
@@ -250,11 +250,10 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
 - **Tools and workflows**
   - Follow applicable safety and runtime restrictions.
   - Reuse project scripts, configured tools, and existing workflows.
-  - Use `bash` for builds, tests, Git, and operations that dedicated tools cannot perform adequately.
+  - Use available command-execution tools for builds, tests, Git, and operations that dedicated tools cannot perform adequately.
   - When existing workflows meet the requirements, do not introduce alternatives.
   - When existing tools cannot meet the requirements, explain the limitation before proposing a change.
   - Learn unfamiliar usage from help or documentation before guessing commands.
-  - For new temporary helpers, follow the Node.js rules below.
 - **Evidence and history**
   - When explaining behavior or history, inspect targeted Git history and linked issues or pull requests when relevant.
   - Base requested work summaries on the relevant history and date range.
@@ -309,27 +308,6 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
   - When commits, pushes, or pull requests are authorized, inspect repository conventions and relevant Git history.
   - Follow the normal workflow. Keep these actions within the requested scope.
 
-## Keep progress visible
-
-- **Progress updates**
-  - Before a potentially slow command or script, briefly explain its purpose.
-  - During extended work, send one or two progress sentences roughly every 20–30 seconds when tool control is available.
-    - State the current step, latest observed result, and what you are waiting for.
-    - If there is no new output, say so.
-  - Never invent progress, percentages, or completion estimates.
-  - Report completion, failures, and blockers promptly.
-- **Command execution**
-  - Use explicit timeouts and manageable command phases.
-  - Reuse existing processes or logs when continuing work.
-    - Do not restart quiet commands or create duplicate monitors.
-  - Surface results incrementally.
-  - Tool output and script heartbeats do not replace user-facing progress.
-- **Waiting and latency**
-  - Blocking tool calls can prevent updates until they return.
-    - Do not promise updates while tool control is unavailable.
-  - Distinguish command execution, result delivery, model or provider latency, and terminal rendering.
-  - Command runtime does not measure the user's entire wait.
-
 ## Bound web research and network waits
 
 - **Research scope**
@@ -375,58 +353,7 @@ Simplified Technical English (STE) is a practical writing policy here, not a cla
   - Keep README files descriptive; agent procedures must use instruction files, not depend on README content.
   - Keep skill instructions in Markdown and configuration data in its required format.
   - Leave installed third-party code and generated artifacts unchanged.
-  - Temporary helpers follow the separate script policy below.
-
-## Temporary scripts: use Node.js and match effort to risk
-
-- **Scope**
-  - These restrictions apply only to new temporary helpers and command orchestration.
-  - Application code and established project workflows may use the project's required languages and runtimes.
-- **Runtime and language**
-  - Prefer dedicated tools and native executables when sufficient.
-  - Do not wrap simple commands in scripts solely for monitoring.
-  - Prefer plain JavaScript with Node.js for small, disposable helpers and simple command orchestration.
-    - Prefer ESM `.mjs` files when a helper needs a file.
-    - Do not add a compiler or static-checking setup for a small JavaScript helper.
-  - When a helper is large or complex, use TypeScript if static checks materially improve safety or correctness.
-    - Run `.ts` helpers directly with Node.js and check them under the shared TypeScript rules.
-  - Keep maintained local Pi code in TypeScript; this exception applies only to disposable helpers.
-  - Do not use Python for temporary scripts.
-  - A shell may launch Node.js or native executables.
-  - Do not write helper logic in PowerShell, CMD, Bash, Git Bash, or another shell language.
-    - This includes file operations, loops, branching, pipelines, and orchestration.
-  - If Node.js cannot meet a temporary scripting need, explain the limitation.
-    - Ask before using another runtime.
-- **Implementation**
-  - Prefer Node.js built-ins such as `node:fs`, `node:path`, `node:os`, and `node:child_process`.
-  - Use built-in `fetch` when suitable.
-  - Launch native executables with argument arrays and `shell: false`.
-  - Use asynchronous child processes and consume output incrementally.
-- **Progress and output**
-  - If a helper can run longer than 20 seconds, emit timestamped heartbeats every 20 seconds.
-    - Write newline-terminated heartbeats to stderr.
-    - Include the current phase and real counters when available.
-  - Emit brief phase milestones.
-  - Keep stdout machine-readable when required.
-  - Clear timers in `finally`. Emit a final success or failure status.
-- **Temporary files and cleanup**
-  - Put helpers and disposable artifacts in a uniquely named OS temporary directory.
-    - Use `fs.mkdtemp` with `os.tmpdir()` where suitable.
-    - If helper dependencies are necessary, install them locally in that directory.
-    - Never install helper dependencies globally or in the user's project.
-  - Make the workflow that creates a temporary directory responsible for removing it.
-    - Enter `try/finally` immediately after creation, before setup, dependency installation, or execution.
-    - Remove the owned directory in `finally`, after success or failure where possible.
-    - Do not rely on a later agent tool call for cleanup.
-    - Stop and await owned child processes before removing their scripts, dependencies, and artifacts.
-    - Delete only paths created for the current task.
-    - Preserve requested deliverables.
-    - Check that the owned directory is absent before reporting cleanup success.
-    - Report cleanup that could not be completed.
-- **Reduce npm supply-chain risk**
-  - Use only `https://packagefeedproxy.microsoft.io/npm/` for temporary npm dependencies, including helper packages, checking tools, and declarations.
-  - Pass `--registry=https://packagefeedproxy.microsoft.io/npm/` explicitly to `npm install`, `npm ci`, `npm exec`, and `npx`.
-  - If this registry is unavailable or rejects a package, report the blocker without switching registries.
+  - Disposable JavaScript helpers are outside this maintained-code policy.
 
 ## Keep reusable instructions concise and scoped
 

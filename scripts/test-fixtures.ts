@@ -28,7 +28,7 @@ export interface FooterPresetsModule {
   getPreset(name: string): FooterPreset;
 }
 export interface FooterSegmentsModule {
-  renderSegment(id: "custom:web_search" | "custom:code_anchor" | "custom:token_usage" | "extension_statuses", context: {
+  renderSegment(id: "custom:web_search" | "custom:code_anchor" | "custom:temp_scripts" | "custom:token_usage" | "extension_statuses", context: {
     theme: Theme;
     colors: unknown;
     customItemsById: Map<string, FooterItem>;

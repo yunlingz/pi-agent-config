@@ -7,7 +7,7 @@ This directory is both Pi's default user configuration directory and a local Git
 Run `pi --no-mcp` from a project folder. Use `pi --no-mcp --continue` to resume its latest session.
 `/model` selects a model, `/thinking` changes reasoning effort, and `/compact` starts manual compaction.
 
-The maintained configuration targets Pi 1.4.0 and Node.js 22.19 or newer compatible runtimes.
+The maintained configuration targets Pi 1.5.1 and Node.js 22.19 or newer compatible runtimes.
 The upgrade skill supports existing npm global and Yarn Classic global installations.
 It identifies the active executable's installation before choosing a package manager.
 It preserves that manager and its package and binary locations; no fixed drive or shell is required.
@@ -69,6 +69,13 @@ Each search uses an independent request with the main session's model, required 
 It sends selected context, not the full conversation, and retains 64k gateway-counted input and 32k generation limits.
 `/web-search on|off|status` controls the session preference. Powerline shows `web: on`, `web: off`, `web: unavailable`, or `web: invalid setting`.
 Configuration edits take effect on `/reload`. The extension uses TypeScript without a build step or MCP.
+
+The local [managed scripts extension](extensions/temp-scripts/README.md) provides `script_inline`, `script_js`, and `script_job`.
+It runs JavaScript helpers and native commands in fresh supervised Node.js processes, with streamed output and retained workspaces.
+When enabled, it blocks agent-issued Bash and PowerShell calls; manual user shell commands remain unchanged.
+`/temp-scripts on|off|status` controls the branch preference. Powerline displays `scripts: on` or `scripts: off`.
+Normal session tools author scripts. CodeAnchor supplies optional hashline/AST behavior without a runtime dependency between the extensions.
+The extension uses no third-party runtime packages. Its [README](extensions/temp-scripts/README.md) describes retention and compatibility limits.
 
 Autoformat is not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
 
@@ -136,6 +143,13 @@ node themes/verify.ts <installed-pi-package-directory>
 node skills/sync-pi-config/scripts/verify.ts <installed-pi-package-directory>
 ```
 
+The managed-script feature has separate real-provider and terminal checks:
+
+```text
+node extensions/temp-scripts/verify-live.ts <installed-pi-package-directory>
+node extensions/temp-scripts/verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>
+```
+
 Offline plugin tests use controlled responses and synthetic models. They need no service credentials or external model requests.
 They cover actual idle-to-parallel triggering, pre-quit ordering, failures, cancellation, single-summary delegation, usage, search controls, and rendering.
 The configuration verifier makes a real read-only request with the configured default model and global resources.
@@ -156,12 +170,10 @@ MCP remains disabled and temporary state is removed after each check.
 ## Instructions and version control
 
 `AGENTS.md` retains portable preferences from the Codex global instructions.
-These cover visible progress, bounded network requests, efficient changes, focused context, code inspection before edits, verification, and scoped reusable guidance.
-Small disposable helpers and simple command orchestration prefer plain JavaScript with Node.js.
-Large or complex helpers use TypeScript when static checks materially improve safety or correctness.
-Temporary TypeScript helpers follow the shared checking rules; small JavaScript helpers need no compiler setup.
-
-The redundant single-agent rules were removed. Codex execution-cell, yield, session-handle, and shell-parameter instructions were replaced with guidance appropriate to Pi's command tools. Progress updates account for blocking tool calls.
+These cover bounded network requests, efficient changes, focused context, code inspection before edits, verification, and scoped reusable guidance.
+Managed execution tools own temporary-script routing, process progress, retention, and cleanup contracts.
+The former global progress and temporary-helper sections were removed after replacement verification.
+Maintained local code retains the centralized TypeScript rules; disposable helpers use JavaScript.
 
 No Codex skills, extensions, MCP servers, sessions, or other Codex settings were migrated.
 

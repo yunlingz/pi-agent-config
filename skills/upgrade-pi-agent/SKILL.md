@@ -117,7 +117,7 @@ disable-model-invocation: true
 - **Timeouts and temporary state**
   - Use a 30-second outer limit for metadata requests.
   - For installation, use an explicit longer limit.
-  - Follow global progress, cancellation, and temporary-directory rules.
+  - Follow the active execution tools' progress, cancellation, and temporary-state contracts.
 
 ### Query npm metadata
 

@@ -4,8 +4,7 @@ Read this file and the shared `tsconfig.json` before writing maintained local Pi
 
 - **Scope**
   - These rules cover extensions, skill scripts, tests, verification tools, shared fixtures, and executable examples.
-  - Disposable helpers follow the separate policy in `AGENTS.md`.
-  - Temporary TypeScript helpers still require these checks.
+  - Disposable JavaScript helpers are outside this maintained-code policy.
 
 ## Design code for the shared rules
 
@@ -61,10 +60,14 @@ Passing runtime tests and passing static checks cover different requirements; ne
 
 - **Required checks**
   - Run strict static checks for new or changed TypeScript before reporting completion.
-  - Follow the temporary-directory ownership rules in `AGENTS.md`.
+  - Keep checking tools and declarations in task-owned OS temporary directories, not repository dependencies.
 - **Directory ownership**
   - Run steps 2–7 inside the directory owner's `try` block.
   - Its `finally` block must perform step 8.
+  - Stop and await owned checking processes before removal; preserve deliverables and verify that the owned directory is absent.
+  - Delete only checking paths created for the current task; report cleanup failures.
+  - Use only `https://packagefeedproxy.microsoft.io/npm/` for checking dependencies, with explicit registry flags and lifecycle scripts disabled.
+  - When that registry fails, report the blocker without switching registries.
 
 ### Run the checking procedure
 
@@ -73,7 +76,7 @@ Passing runtime tests and passing static checks cover different requirements; ne
   2. Install the Go-based TypeScript compiler and baseline Node.js declarations there, with lifecycle scripts disabled.
   3. Resolve required host declarations from installed Pi package metadata, including hoisted dependencies.
   4. Create a temporary configuration that extends the shared `tsconfig.json` without weakening its rules.
-  5. Set temporary declaration paths and include all maintained source, tests, verifiers, fixtures, and temporary TypeScript helpers.
+  5. Set temporary declaration paths and include all affected maintained source, tests, verifiers, and fixtures.
   6. Run the compiler with `noEmit` and `erasableSyntaxOnly` enabled.
   7. Run the relevant runtime tests against the actual implementation.
   8. Remove the owned directory in `finally`, including after setup, installation, or checking failures.

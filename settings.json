@@ -66,6 +66,12 @@
         "color": "muted"
       },
       {
+        "id": "temp_scripts",
+        "statusKey": "temp-scripts",
+        "position": "left",
+        "color": "muted"
+      },
+      {
         "id": "token_usage",
         "statusKey": "token-usage",
         "position": "left",
@@ -78,6 +84,7 @@
         "thinking",
         "custom:web_search",
         "custom:code_anchor",
+        "custom:temp_scripts",
         "shell_mode",
         "path",
         "git",
