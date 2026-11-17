@@ -1,0 +1,14 @@
+{
+  "treeSitterPlatformRevision": "3fb7be49145acfb07e33b61ed5689e2b6771b2e9",
+  "treeSitterEngineVersion": "0.25.10",
+  "libcRevision": "161b3195fc2558d2b1ba3eb9ffae3b2b47407623",
+  "printfRevision": "d8b9a6119ff5538107d66c12597294a0fa063cf3",
+  "changes": [
+    "Pinned Tree-sitter0.27.2 string/wide-character C subset and headers, without its no-op stdio.",
+    "Tree-sitter0.25.10 engine sources remain unchanged; Rust build script adds the bare-WASM include path.",
+    "Owned stdio bridge uses the pinned printf formatter and explicit host diagnostic writes.",
+    "Owned monotonic clock bridge calls the Node performance clock.",
+    "C locale and scanner header additions support the pinned parser set.",
+    "Rust allocator bridge is pinned upstream source and shares the selected Rust allocator."
+  ]
+}

@@ -22,6 +22,8 @@ export async function createLiveSession(options: {
   extensionPaths: string[];
   modelOverride?: string;
   extensionFactories?: ExtensionFactory[];
+  appendSystemPrompt?: string[];
+  includeBuiltinTools?: boolean;
   load?: (operation: () => Promise<void>) => Promise<void>;
 }) {
   process.env.PI_OFFLINE = "1";
@@ -49,7 +51,7 @@ export async function createLiveSession(options: {
     noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
     disabledBuiltinExtensions: ["mcp"], additionalExtensionPaths: options.extensionPaths,
     extensionFactories: options.extensionFactories,
-    appendSystemPrompt: ["This is a read-only verification with synthetic history. Do not browse or change files. Do not use MCP."],
+    appendSystemPrompt: options.appendSystemPrompt ?? ["This is a read-only verification with synthetic history. Do not browse or change files. Do not use MCP."],
   });
   if (options.load) await options.load(() => loader.reload());
   else await loader.reload();
@@ -70,7 +72,7 @@ export async function createLiveSession(options: {
   const manager = sdk.SessionManager.create(cwd, join(cwd, "sessions"));
   const { session } = await sdk.createAgentSession({
     cwd, agentDir: agentDirectory, settingsManager: settings, modelRuntime: runtime,
-    model, resourceLoader: loader, sessionManager: manager, tools: [],
+    model, resourceLoader: loader, sessionManager: manager, tools: options.includeBuiltinTools ? undefined : [],
   });
   return { sdk, settings, runtime, loader, manager, session };
 }

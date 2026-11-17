@@ -1,0 +1,7 @@
+extensions/code-anchor/wasm/*.wasm filter=lfs diff=lfs merge=lfs -text
+
+# Preserve whitespace in pinned third-party sources and literal license notices.
+extensions/code-anchor/rust/vendor/tree-sitter/** -whitespace
+extensions/code-anchor/rust/platform/libc/** -whitespace
+extensions/code-anchor/rust/platform/printf/** -whitespace
+extensions/code-anchor/THIRD-PARTY-NOTICES -whitespace
