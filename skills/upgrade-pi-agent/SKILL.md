@@ -26,6 +26,9 @@ disable-model-invocation: true
   - You must not use `pi update`, broad package upgrades, upstream installers, or direct edits to installed code.
   - Use the existing installation's package manager for upgrades and recovery.
   - You must not change package managers or create a second Pi installation.
+- **Execution safety**
+  - Before installation or recovery, read and follow [Upgrade execution safety](references/execution-safety.md).
+  - On Windows, prepare host upgrades for an external terminal; all Pi processes using that installation must exit first.
 
 ## 1. Identify the installation
 
@@ -84,8 +87,9 @@ disable-model-invocation: true
 - **Procedure**
   1. Run required checks from [sync-pi-config](../sync-pi-config/SKILL.md), including offline plugin checks.
   2. When a baseline check fails, stop before upgrading.
-  3. Record recovery versions, installation locations, extension pins, and relevant settings in owned private temporary state.
-  4. For Yarn Classic, retain its global manifest and lockfile as recovery evidence.
+  3. Pass the shared read-only preflight before using any new installation or verification helper.
+  4. Record recovery versions, installation locations, extension pins, and relevant settings in owned private temporary state.
+  5. For Yarn Classic, retain its global manifest and lockfile as recovery evidence.
 
 ## 2. Select a version through the company registry
 
@@ -201,9 +205,11 @@ yarn global add @earendil-works/pi-coding-agent@<exact-version> --exact --ignore
   - Reinstalling an exact direct version does not guarantee restoration of every transitive dependency.
   - You must not overwrite concurrent changes with saved manifests or lockfiles.
   - You must not terminate the caller's running Pi session.
+  - Classify failures using the shared execution safety rules before changing packages.
+  - When native-file locks block replacement, stop and require external recovery after the owning processes exit.
 - **Procedure**
 
-  When installation or a required host check fails:
+  When installation or a valid required host check fails:
 
   1. Stop the installer.
   2. Await its exit.

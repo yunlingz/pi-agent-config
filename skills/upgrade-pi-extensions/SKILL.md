@@ -34,6 +34,9 @@ Reading, reviewing, or testing this skill does not authorize upgrades or Git cha
   - You must not push, amend, force-stage, change remotes, or bypass hooks.
   - Follow the explicit upgrade request without repeated approval or manual-test questions.
   - When a prerequisite is missing, report the blocker instead of bypassing it.
+- **Execution safety**
+  - Before installation or recovery, read and follow [Upgrade execution safety](../upgrade-pi-agent/references/execution-safety.md).
+  - On Windows, check affected extensions and shared dependencies for native-file locks before replacement.
 
 ## Registry and installation safety
 
@@ -81,6 +84,7 @@ Reading, reviewing, or testing this skill does not authorize upgrades or Git cha
   4. Confirm that each installed npm version matches its saved exact pin.
   5. Run required baseline checks from [sync-pi-config](../sync-pi-config/SKILL.md).
   6. When the baseline did not cover saved offline plugin checks, run them.
+  7. Pass the shared read-only preflight before using any new installation or verification helper.
 
 ## 2. Select candidates
 
@@ -141,9 +145,11 @@ Reading, reviewing, or testing this skill does not authorize upgrades or Git cha
   - You must not overwrite concurrent changes with a whole-file backup.
   - Exact pins do not fully lock transitive dependencies.
   - Reinstallation cannot guarantee reversal of external side effects.
+  - Classify failures using the shared execution safety rules before changing packages.
+  - When native-file locks block replacement, stop and require external recovery after the owning processes exit.
 - **Procedure**
 
-  When installation, settings preservation, or a required check fails:
+  When installation, settings preservation, or a valid required check fails:
 
   1. Stop the owned installer.
   2. Await its exit.

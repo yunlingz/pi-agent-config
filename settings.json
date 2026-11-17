@@ -34,8 +34,8 @@
   "packages": [
     "npm:@juicesharp/rpiv-todo@2.15.0",
     "npm:@juicesharp/rpiv-ask-user-question@2.15.0",
-    "npm:pi-powerline-footer@0.21.0",
-    "npm:@plannotator/pi-extension@0.28.33"
+    "npm:pi-powerline-footer@0.22.0",
+    "npm:@plannotator/pi-extension@0.28.59"
   ],
   "workingVibe": "off",
   "powerline": {
