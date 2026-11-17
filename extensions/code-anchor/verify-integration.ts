@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,16 +47,18 @@ try {
       return stream;
     },
   });
+  const extensionDirectory = join(temporary, "extensions");
+  await mkdir(extensionDirectory);
+  await symlink(dirname(fileURLToPath(import.meta.url)), join(extensionDirectory, "code-anchor"), process.platform === "win32" ? "junction" : "dir");
   const loader = new sdk.DefaultResourceLoader({
     cwd: temporary, agentDir: temporary, settingsManager: settings,
-    noExtensions: true, disabledBuiltinExtensions: ["mcp"], noSkills: true,
+    disabledBuiltinExtensions: ["mcp"], noSkills: true,
     noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    additionalExtensionPaths: [join(dirname(fileURLToPath(import.meta.url)), "extension.ts")],
     extensionFactories: [pi => pi.registerTool(sdk.createGrepToolDefinition(temporary))],
   });
   await loader.reload();
   assert.deepEqual(loader.getExtensions().errors, []);
-  assert.equal(loader.getExtensions().extensions.length, 2);
+  assert.equal(loader.getExtensions().extensions.length, 2, "Pi must discover CodeAnchor without an explicit extension path");
   ({ session } = await sdk.createAgentSession({ cwd: temporary, agentDir: temporary, settingsManager: settings, modelRuntime: runtime, model: runtime.getModel("code-anchor-fixture", "fixture"), thinkingLevel: "off", resourceLoader: loader, sessionManager: sdk.SessionManager.inMemory() }));
   const statuses = new Map<string, string>();
   const errors: unknown[] = [];
@@ -175,7 +177,7 @@ try {
   assert(!preparation.fileOps.written.has("xd://reject"));
   assert.deepEqual(errors, []);
   assert.equal(networkAttempts, 0);
-  console.log("PASS: actual Pi loading, tool schemas, portable WASM worker, hashline edit, AST search/preview/apply/discard, real on/off tool replacement, footer statuses and native compaction metadata; local provider fixtures only; zero network requests");
+  console.log("PASS: automatic Pi discovery, default-on activation, tool schemas, portable WASM worker, hashline edit, AST search/preview/apply/discard, real on/off tool replacement, footer statuses and native compaction metadata; local provider fixtures only; zero network requests");
 } finally {
   clearInterval(heartbeat);
   globalThis.fetch = originalFetch;

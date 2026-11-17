@@ -1,7 +1,8 @@
 # CodeAnchor
 
 CodeAnchor is a Pi extension with an owned Rust/WebAssembly core.
-Its current local implementation meets the approved development checks; global activation and publication remain separate steps.
+Its current local implementation meets the approved development checks and loads globally by default.
+Publication remains a separate step.
 It has no OMP package, native addon, WASI, or Wasmtime dependency at runtime.
 The behavioral reference is pinned in `reference.json`.
 
@@ -19,11 +20,13 @@ Normal WASM loading includes compilation by the JavaScript engine; no user-side 
 
 ## Current status
 
-The extension is not enabled globally: the auto-discovered `index.ts` is intentionally absent.
-Isolated verification loads `extension.ts` through the installed Pi.
+Pi automatically discovers the global `index.ts` entry point.
+New sessions enable CodeAnchor by default; existing sessions load it after `/reload`.
+The on/off command retains each active branch's preference across reloads.
+Isolated integration and terminal checks use automatic discovery without an explicit CodeAnchor extension path.
 The 22-grammar implementation passes 393 Rust tests on Windows.
 The complete saved offline workflow passes on Windows and Linux under Debian WSL: 156 unit tests and six integrations each.
-Strict TypeScript checks pass for 58 maintained files under the shared configuration.
+Strict TypeScript checks pass for maintained files under the shared configuration.
 Seven isolated live workflows and real manual compaction pass on both environments with the configured model and reasoning level.
 Each extended live run completed 12 actual tool calls; its 19 regular-request hooks exclude native compaction requests.
 Actual Pi terminal tests pass on Windows ConPTY and a Linux pseudoterminal under WSL.
@@ -162,7 +165,7 @@ All 22 selected parsers remain included. Git LFS changes repository storage, not
 
 The saved offline workflow includes the toggle tests, final-WASM checks, pinned disk-backed fixtures, Powerline rendering, and real Pi integration with a local fixture provider.
 `verify-live.ts` additionally checks a raw read and exact marker reply with the configured provider, model, and reasoning level.
-That read-only live check passed without changing global activation or model settings.
+That read-only live check passed without changing model settings.
 `verify-live-session.ts` additionally checks multi-turn hashline editing, AST search, preview application, preview discard, off/reload, and re-enabled raw reads.
 It also performs native manual compaction, checks persisted file metadata, reloads, and verifies a fresh hashline edit.
 Its temporary project settings retain no recent history for that compaction case; global settings remain unchanged.
@@ -170,7 +173,7 @@ Live tests use temporary fixtures and retain the configured provider, model, and
 They do not certify every model-generated edit.
 
 `verify-tui.ts` starts the actual Pi CLI through an existing `node-pty` installation and loads the installed Powerline extension.
-The test uses isolated settings, synthetic source, a local fixture provider, and no credentials or network requests.
+The test uses automatic CodeAnchor discovery, isolated settings, synthetic source, a local fixture provider, and no credentials or network requests.
 It verifies real keyboard commands, tool results, on/off status output, reload preference, built-in tool restoration, resizing, and shutdown.
 The checked sizes are 120 columns by 36 rows and 60 columns by 24 rows in full-screen mode.
 Assertions inspect terminal output, lifecycle events, and filesystem bytes. Human visual review and other terminal emulators remain unverified.

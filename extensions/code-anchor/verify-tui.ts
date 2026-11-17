@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,7 +34,8 @@ async function main(): Promise<void> {
   try {
     const agent = join(temporary, "agent");
     const workspace = join(temporary, "workspace");
-    await mkdir(agent);
+    await mkdir(join(agent, "extensions"), { recursive: true });
+    await symlink(root, join(agent, "extensions", "code-anchor"), process.platform === "win32" ? "junction" : "dir");
     await mkdir(workspace);
     await writeFile(join(workspace, "fixture.ts"), "// terminal fixture\nconsole.log(before);\n");
     await writeFile(join(agent, "settings.json"), JSON.stringify({
@@ -48,8 +49,8 @@ async function main(): Promise<void> {
     }));
     terminal = pty.spawn(process.execPath, [
       resolve(installation, packageInfo.bin.pi), "--offline", "--no-approve", "--no-mcp", "--no-session",
-      "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-themes",
-      "--extension", join(root, "extension.ts"), "--extension", resolve(footerDirectory),
+      "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-themes",
+      "--extension", resolve(footerDirectory),
       "--extension", join(root, "tests", "tui-fixture.ts"),
       "--tools", "read,edit,write,ast_grep,ast_edit", "--tui-mode", "fullscreen",
     ], {
@@ -137,7 +138,7 @@ async function main(): Promise<void> {
     await wait("waiting for graceful terminal shutdown", () => exit !== undefined);
     assert.equal(exit?.exitCode, 0);
     assert((await trace()).some(event => event.event === "session_shutdown" && event.reason === "quit"));
-    console.log("PASS: actual Pi TUI, keyboard commands, hashline and AST tools, Powerline on/off, reload, built-in restoration, resize, re-enable, and graceful shutdown; zero network requests");
+    console.log("PASS: actual Pi TUI, automatic CodeAnchor discovery, default-on activation, keyboard commands, hashline and AST tools, Powerline on/off, reload, built-in restoration, resize, re-enable, and graceful shutdown; zero network requests");
   } catch (error) {
     console.error(JSON.stringify({ phase, terminalBytes: bytes, exitCode: exit?.exitCode, failure: error instanceof assert.AssertionError ? error.message : "Terminal verification failed; diagnostics withheld" }));
     throw error;
