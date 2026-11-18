@@ -15,7 +15,7 @@ import { restoredPreference, PREFERENCE_ENTRY } from "./controls.ts";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { executionEnvironment, mergeEnvironment, projectBinDirectories } from "./environment.ts";
 import { nodeShimTarget, nativeInvocation } from "./executables.ts";
-import { CommandLog } from "./commands.ts";
+import { CommandLog, commandText } from "./commands.ts";
 import { jobDirectory, storageRoot } from "./storage.ts";
 import { backgroundActive, backgroundStatus, forgetBackground, runForeground, startBackground, stopBackground, stopSessionBackground } from "./background.ts";
 
@@ -553,5 +553,43 @@ test("background exec accepts omitted options while foreground exec still requir
     assert.equal(foreground.status, "failed");
     assert.match(foreground.output, /explicit positive deadline/u);
     assert(!foreground.output.includes("TypeError"));
+  });
+});
+
+test("accepted nonzero child exits do not retain safe successful inline jobs", async () => {
+  await fixture(async job => {
+    const code = [
+      'const {exec}=await import(process.env.PI_SCRIPT_RUNTIME);',
+      'const child=await exec("git",["config","--file",process.env.PI_SCRIPT_WORK+"/absent.gitconfig","--get","core.hooksPath"],{timeoutSeconds:2,allowFailure:true});',
+      'if(child.exitCode!==1) throw new Error("Expected an absent Git setting");',
+    ].join("\n");
+    await writeFile(join(job.root, "work", "main.mjs"), code);
+    const output = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: "Expected absent Git setting", cwd: job.root, timeoutSeconds: 4, inline: code });
+    assert.equal(output.status, "succeeded", output.output);
+    assert.equal(output.commands[0]?.status, "failed");
+    assert.equal(output.commands[0]?.exitCode, 1);
+    const command = output.commands[0];
+    assert(command);
+    assert.equal(command.failureAccepted, true);
+    assert.match(commandText(command), /failed \(accepted exit 1\)/u);
+    assert.equal((await finishInline(job, job.sessionId, output)).state, "removed");
+    assert(!existsSync(job.root));
+  });
+});
+
+test("accepted failures do not hide timeouts, unexpected failures, or failed parent execution", async () => {
+  const cases = [
+    { name: "caught unexpected exit", code: 'try { await exec(process.execPath,["-e","process.exitCode=2"],{timeoutSeconds:2}); } catch {}' },
+    { name: "accepted child timeout", code: 'await exec(process.execPath,["-e","setInterval(()=>{},1000)"],{timeoutSeconds:0.1,allowFailure:true});' },
+    { name: "accepted child signal", code: `await exec(process.execPath,["-e","process.kill(process.pid,'SIGTERM')"],{timeoutSeconds:2,allowFailure:true});` },
+    { name: "failed parent", code: 'await exec(process.execPath,["-e","process.exitCode=2"],{timeoutSeconds:2,allowFailure:true});process.exitCode=3;' },
+  ];
+  for (const entry of cases) await fixture(async job => {
+    const code = `const {exec}=await import(process.env.PI_SCRIPT_RUNTIME);${entry.code}`;
+    await writeFile(join(job.root, "work", "main.mjs"), code);
+    const output = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: entry.name, cwd: job.root, timeoutSeconds: 4, inline: code });
+    assert.equal((await finishInline(job, job.sessionId, output)).state, "retained", entry.name);
+    assert(existsSync(job.root), entry.name);
+    if (entry.name !== "failed parent") assert.equal(output.commands[0]?.failureAccepted, false, entry.name);
   });
 });

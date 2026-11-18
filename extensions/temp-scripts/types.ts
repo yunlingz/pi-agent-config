@@ -11,6 +11,7 @@ export interface CommandEvent {
   status: "running" | RunStatus;
   exitCode?: number | null;
   truncated?: boolean;
+  failureAccepted?: boolean;
 }
 
 export interface SourceView {
@@ -40,10 +41,28 @@ export interface ExecutionDetails {
   record?: RunResult;
 }
 
+export interface JobIdentity {
+  id: string;
+  purpose: string;
+}
+
+export interface JobActionDetails {
+  kind: "script-job";
+  jobs: JobIdentity[];
+}
+
+export type ScriptDetails = ExecutionDetails | JobActionDetails;
+
+export interface RetentionView extends JobIdentity {
+  state: "preparing" | "running" | "retained" | "pinned" | "cleanup_failed" | "unresolved";
+  reason: string;
+}
+
 export interface JobReference {
   id: string;
   root: string;
   token: string;
+  purpose?: string;
 }
 
 export interface JobManifest extends JobReference {

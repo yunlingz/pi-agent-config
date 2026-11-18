@@ -34,7 +34,9 @@ export async function exec(command: string, args: string[], options: { timeoutSe
     }),
   });
   await writeFile(join(directory, "result.json"), JSON.stringify(result, null, 2), { mode: 0o600 });
-  report({ ...event, status: result.status, exitCode: result.exitCode, truncated: result.truncated });
+  const failureAccepted = options.allowFailure === true && result.status === "failed" && result.exitCode !== null
+    && result.exitCode !== 0 && result.signal === null && result.terminationConfirmed && !result.launchError;
+  report({ ...event, status: result.status, exitCode: result.exitCode, truncated: result.truncated, failureAccepted });
   if (result.status !== "succeeded" && !options.allowFailure) throw new Error(`Native command ${result.status}; exit ${result.exitCode}; logs: ${directory}`);
   return { ...result, logs: directory };
 }

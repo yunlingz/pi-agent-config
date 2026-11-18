@@ -123,6 +123,12 @@ try {
   assert.equal(observedExecutions.at(-1)?.mode,"inline");
   assert.equal(observedExecutions.at(-1)?.retention?.state,"removed");
   assert(!existsSync(latest().root));
+  await run("accepted nonzero cleanup", "Use one foreground script_inline helper to query an absent Git setting. Call managed exec with git arguments config, --file, absent-fixture.gitconfig, --get, core.hooksPath. Set allowFailure:true, inspect the returned exit code, and require exit code 1. Do not create the config file, a reusable workspace, or set keep:true.", ["script_inline"]);
+  const accepted = observedExecutions.at(-1);
+  assert(accepted);
+  assert.equal(accepted?.retention?.state, "removed");
+  assert(accepted.commands.some(command => command.status === "failed" && command.exitCode === 1 && command.failureAccepted));
+  assert(!existsSync(latest().root));
   if (process.platform !== "win32") {
     await mkdir(join(temporary,"node_modules",".bin"),{recursive:true});
     await symlink(process.execPath,join(temporary,"node_modules",".bin","project-path-fixture"));

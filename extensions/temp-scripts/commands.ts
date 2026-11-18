@@ -9,7 +9,8 @@ export function commandEvent(value: unknown): CommandEvent | undefined {
     || !("args" in value) || !Array.isArray(value.args) || !value.args.every((arg: unknown) => typeof arg === "string")
     || !("status" in value) || !STATUSES.includes(String(value.status))
     || ("exitCode" in value && value.exitCode !== null && !Number.isInteger(value.exitCode))
-    || ("truncated" in value && typeof value.truncated !== "boolean")) return undefined;
+    || ("truncated" in value && typeof value.truncated !== "boolean")
+    || ("failureAccepted" in value && typeof value.failureAccepted !== "boolean")) return undefined;
   if (value.id.length > 100 || value.args.length > 256 || JSON.stringify(value).length > 16 * 1024) return undefined;
   // The checked IPC contract carries no host objects or executable behavior.
   return value as CommandEvent;
@@ -37,5 +38,6 @@ export class CommandLog {
 
 /** JSON argument notation shows the actual array; it is not a shell command to copy and execute. */
 export function commandText(event: CommandEvent): string {
-  return `${event.status}: ${event.command} ${JSON.stringify(event.args)}\ncwd: ${event.cwd}`;
+  const status = event.failureAccepted ? `${event.status} (accepted exit ${event.exitCode})` : event.status;
+  return `${status}: ${event.command} ${JSON.stringify(event.args)}\ncwd: ${event.cwd}`;
 }

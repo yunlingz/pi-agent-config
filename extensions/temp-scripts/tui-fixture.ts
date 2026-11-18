@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { backgroundViews } from "./background.ts";
+import type { JobReference } from "./types.ts";
 
 export interface TerminalTrace {
   event: string;
@@ -19,6 +20,7 @@ export default function fixture(pi: ExtensionAPI): void {
   assert(directory, "The terminal fixture requires an owned directory");
   const record = (value: TerminalTrace) => appendFileSync(join(directory, "trace.jsonl"), `${JSON.stringify(value)}\n`);
   let sessionId="";
+  let retainedJob: string | undefined;
   globalThis.fetch = async () => { record({ event: "network" }); throw new Error("No network in terminal fixtures"); };
   pi.registerProvider("scripts-terminal-fixture", {
     api: "scripts-terminal-fixture", apiKey: "local-fixture", baseUrl: "http://127.0.0.1:1",
@@ -41,6 +43,10 @@ export default function fixture(pi: ExtensionAPI): void {
         else if (results.length === 1) { assert(work); plan("write", {path:join(work,"main.mjs"),content:'// WORKSPACE_SOURCE_VISIBLE\nconsole.log(["WORKSPACE","DONE"].join("_"));\n'}); }
         else if (results.length === 2) { assert(id); plan("script_js", {job:id,entry:"main.mjs",purpose:"Workspace execution",timeoutSeconds:5}); }
         else if (results.length === 3) { assert(id); plan("script_job", {action:"release",job:id}); }
+      } else if (prompt.includes("retention fixture")) {
+        if (results.length === 0) plan("script_inline", { purpose: "Terminal retained fixture", code: 'console.log("RETAIN_LIVE");await new Promise(accept=>setTimeout(accept,1500));', keep: true, timeoutSeconds: 5 });
+      } else if (prompt.includes("release retained")) {
+        if (results.length === 0) { assert(retainedJob); plan("script_job", { action: "release", job: retainedJob }); }
       } else if(prompt.includes("background")) {
         if(results.length===0) plan("script_inline",{purpose:"Fixed panel service",code:'console.log(["PANEL","LIVE"].join("_"),process.pid);setInterval(()=>{},1000);',timeoutSeconds:2,background:{service:true}});
       } else if(prompt.includes("stop service")) {
@@ -70,10 +76,22 @@ export default function fixture(pi: ExtensionAPI): void {
       return stream;
     },
   });
-  pi.on("session_start", (event,ctx) => {sessionId=ctx.sessionManager.getSessionId();record({event:"start",reason:event.reason,tools:pi.getActiveTools()});});
+  pi.on("session_start", (event, ctx) => {
+    sessionId = ctx.sessionManager.getSessionId();
+    retainedJob = undefined;
+    for (const entry of ctx.sessionManager.getEntries()) if (entry.type === "custom" && entry.customType === "temp-script-job") {
+      const job = entry.data as JobReference;
+      if (job.purpose === "Terminal retained fixture") retainedJob = job.id;
+    }
+    record({ event: "start", reason: event.reason, tools: pi.getActiveTools() });
+  });
   pi.on("tool_execution_end", event => record({event:"tool_end",error:event.isError}));
   pi.on("agent_settled", (_event, ctx) => {
-    for (const entry of ctx.sessionManager.getEntries()) if (entry.type === "custom" && entry.customType === "temp-script-job") record({event:"job",root:(entry.data as {root:string}).root});
+    for (const entry of ctx.sessionManager.getEntries()) if (entry.type === "custom" && entry.customType === "temp-script-job") {
+      const job = entry.data as JobReference;
+      record({ event: "job", root: job.root });
+      if (job.purpose === "Terminal retained fixture") retainedJob = job.id;
+    }
     record({event:"settled"});
   });
   pi.on("session_shutdown", event => record({event:"shutdown",reason:event.reason}));

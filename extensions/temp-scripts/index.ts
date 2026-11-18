@@ -8,13 +8,13 @@ import { cleanupJob, createJob, executeJob, finishInline, inspectJob, jobReferen
 import { blockedTool } from "./policy.ts";
 import { displayText } from "./process.ts";
 import { progressText, registerProgress } from "./progress.ts";
-import { ENTRY_TYPE, REMOVED_ENTRY_TYPE, type ExecutionDetails, type JobReference, type Progress, type RunOptions } from "./types.ts";
+import { ENTRY_TYPE, REMOVED_ENTRY_TYPE, type JobIdentity, type JobManifest, type JobReference, type Progress, type RunOptions, type ScriptDetails } from "./types.ts";
 import { registerControls, TOOL_NAMES } from "./controls.ts";
 import { inlineRenderers, workspaceRenderers, jobRenderers } from "./render.ts";
 import { executionEnvironment } from "./environment.ts";
 import { executionText, executionView } from "./execution.ts";
 import { backgroundActive, backgroundStatus, backgroundSummary, forgetBackground, runForeground, startBackground, stopBackground, stopSessionBackground } from "./background.ts";
-import { registerBackgroundPanel } from "./background-panel.ts";
+import { registerJobPanels } from "./background-panel.ts";
 
 const timeoutSchema = Type.Number({ exclusiveMinimum: 0, maximum: 86400, description: "Total deadline in seconds, including preparation" });
 const purposeSchema = Type.String({ minLength: 1, maxLength: 300, description: "Brief user-facing purpose" });
@@ -24,7 +24,7 @@ const backgroundSchema = Type.Optional(Type.Union([
   Type.Object({service:Type.Literal(true),readyUrl:readyUrlSchema},{additionalProperties:false,description:"Service: run until stopped or session shutdown. No runtimeSeconds field."}),
   Type.Object({runtimeSeconds:Type.Number({exclusiveMinimum:0,maximum:7*86400}),readyUrl:readyUrlSchema},{additionalProperties:false,description:"Finite background work with an explicit runtime deadline. No service field."}),
 ],{default:false,description:"Default false: foreground. Only requested independent long work uses a service or finite-job object, never both forms."}));
-const result = (text: string, isError = false, details: ExecutionDetails | undefined = undefined) => {
+const result = <T extends ScriptDetails | undefined = undefined>(text: string, isError = false, details?: T) => {
   const safe = displayText(text);
   const content = Buffer.byteLength(safe) > 49 * 1024 ? `${Buffer.from(safe).subarray(0, 48 * 1024).toString("utf8")}\n[Result truncated; inspect retained job files.]` : safe;
   return { content: [{ type: "text" as const, text: content }], details, isError };
@@ -42,17 +42,30 @@ export default function tempScripts(pi: ExtensionAPI): void {
   const register = (reference: JobReference) => {
     pi.appendEntry(ENTRY_TYPE, reference);
     references.set(reference.id, reference);
+    panels.set({ id: reference.id, purpose: reference.purpose ?? "Managed job", state: "preparing", reason: "Preparing owned job files" });
   };
   const forget = (reference: JobReference) => {
     pi.appendEntry(REMOVED_ENTRY_TYPE, { id: reference.id });
     references.delete(reference.id);
     forgetBackground(reference.id);
+    panels.remove(reference.id);
   };
   pi.on("session_start", async (_event, ctx) => {
     references.clear();
+    panels.reset();
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === ENTRY_TYPE && jobReference(entry.data)) references.set(entry.data.id, entry.data);
       if (entry.type === "custom" && entry.customType === REMOVED_ENTRY_TYPE && entry.data !== null && typeof entry.data === "object" && "id" in entry.data && typeof entry.data.id === "string") references.delete(entry.data.id);
+    }
+    for (const reference of [...references.values()]) {
+      if (!existsSync(reference.root)) { forget(reference); continue; }
+      try {
+        const job = await inspectJob(reference, ctx.sessionManager.getSessionId());
+        references.set(job.id, { ...reference, purpose: job.purpose });
+        panels.set({ id: job.id, purpose: job.purpose, state: job.state === "pinned" ? "pinned" : "retained", reason: "Registered files remain until explicit release" });
+      } catch {
+        panels.set({ id: reference.id, purpose: reference.purpose ?? "Managed job", state: "unresolved", reason: "Inspect ownership, state, and process lease before cleanup" });
+      }
     }
   });
   pi.on("session_shutdown", async (event,ctx) => {
@@ -62,7 +75,14 @@ export default function tempScripts(pi: ExtensionAPI): void {
     await stopSessionBackground(ctx.sessionManager.getSessionId());
   });
   const progress = registerProgress(pi, () => enabled);
-  registerBackgroundPanel(pi);
+  const panels = registerJobPanels(pi);
+  const stored = (job: JobManifest, reason: string) => panels.set({ id: job.id, purpose: job.purpose, state: job.state === "pinned" ? "pinned" : "retained", reason });
+  const tracking = async <T>(reference: JobReference, sessionId: string, action: (job: JobManifest) => Promise<T>): Promise<T> => {
+    const job = await inspectJob(reference, sessionId);
+    panels.set({ id: job.id, purpose: job.purpose, state: "running", reason: "Execution owns these files" });
+    try { return await action(job); }
+    catch (error) { stored(job, "Execution did not finish normally; diagnostic files preserved"); throw error; }
+  };
 
   pi.on("tool_call", event => {
     if (!enabled) {
@@ -115,6 +135,7 @@ export default function tempScripts(pi: ExtensionAPI): void {
     "In script_inline and script_js, import process.env.PI_SCRIPT_RUNTIME and call exec(command,args,{timeoutSeconds,cwd?,env?,input?,allowFailure?}). Output streams automatically.",
     "script_inline example: const {exec}=await import(process.env.PI_SCRIPT_RUNTIME); await exec('git',['status','--short'],{timeoutSeconds:10});",
     "For script_inline and script_js, exec throws on failure; set allowFailure:true only when inspecting an expected nonzero status.",
+    "Accepted normal nonzero exits do not retain safe successful inline jobs. Timeouts, truncation, and uncertain termination still preserve evidence.",
     "In script_inline and script_js, use input for finite stdin. Implement pipelines, glob expansion, and filesystem operations in JavaScript.",
     "Use background:{runtimeSeconds:...} for finite long jobs, or background:{service:true} for requested services; timeoutSeconds is then the startup deadline.",
     "For script_inline/script_js background, choose either service:true or runtimeSeconds, never both. Supply readyUrl only for a known real loopback endpoint.",
@@ -133,20 +154,27 @@ export default function tempScripts(pi: ExtensionAPI): void {
     async execute(_id, input, signal, onUpdate, ctx) {
       return supervised(signal, async ownedSignal => {
         const job = await createJob(ctx.sessionManager.getSessionId(), input.purpose, register);
-        await writeFile(join(job.root, "work", "main.mjs"), input.code, { mode: 0o600 });
-        const view = executionView("inline", resolve(ctx.cwd, input.cwd ?? "."), (text, details) => onUpdate?.(result(text, false, details)), { text: input.code, truncated: false });
-        view.start();
-        if(input.background){
-          const details=await startBackground(job,job.sessionId,"main.mjs",[],"inline",{...options(input.purpose,input.cwd,input.timeoutSeconds,ctx,ownedSignal,undefined),inline:input.code,onProgress:view.onProgress},{...input.background,startupSeconds:input.timeoutSeconds});
-          return result(backgroundSummary(input.purpose,details),false,details);
-        }
-        const completed = await runForeground(job, job.sessionId, "main.mjs", [], "inline", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), inline: input.code, onProgress: view.onProgress });
-        if(!completed.record) return result(backgroundSummary(input.purpose,completed),false,completed);
-        const output=completed.record;
-        const retention = await finishInline(job, job.sessionId, output, input.keep);
-        if (retention.state === "removed") forget(job);
-        const details = view.finish(output, retention);
-        return result(executionText(details), output.status !== "succeeded" || retention.state === "cleanup_failed", details);
+        return tracking(job, job.sessionId, async () => {
+          await writeFile(join(job.root, "work", "main.mjs"), input.code, { mode: 0o600 });
+          const view = executionView("inline", resolve(ctx.cwd, input.cwd ?? "."), (text, details) => onUpdate?.(result(text, false, details)), { text: input.code, truncated: false });
+          view.start();
+          if (input.background) {
+            const details = await startBackground(job, job.sessionId, "main.mjs", [], "inline", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), inline: input.code, onProgress: view.onProgress }, { ...input.background, startupSeconds: input.timeoutSeconds });
+            stored(job, "Background evidence remains until completion/stop and explicit release");
+            return result(backgroundSummary(input.purpose, details), false, details);
+          }
+          const completed = await runForeground(job, job.sessionId, "main.mjs", [], "inline", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), inline: input.code, onProgress: view.onProgress });
+          if (!completed.record) {
+            stored(job, "Waiting interrupted; files remain until explicit release");
+            return result(backgroundSummary(input.purpose, completed), false, completed);
+          }
+          const output = completed.record;
+          const retention = await finishInline(job, job.sessionId, output, input.keep);
+          if (retention.state === "removed") forget(job);
+          else panels.set({ id: job.id, purpose: job.purpose, state: retention.state, reason: retention.reason });
+          const details = view.finish(output, retention);
+          return result(executionText(details), output.status !== "succeeded" || retention.state === "cleanup_failed", details);
+        });
       });
     },
   });
@@ -161,20 +189,25 @@ export default function tempScripts(pi: ExtensionAPI): void {
     parameters: Type.Object({ job: Type.String(), purpose: purposeSchema, entry: Type.String(), args: Type.Optional(Type.Array(Type.String())), cwd: Type.Optional(Type.String()), timeoutSeconds: timeoutSchema, test: Type.Optional(Type.Boolean()),background:backgroundSchema }),
     executionMode: "sequential", ...workspaceRenderers,
     async execute(_id, input, signal, onUpdate, ctx) {
-      return supervised(signal, async ownedSignal => {
+      return supervised(signal, ownedSignal => tracking(lookup(input.job), ctx.sessionManager.getSessionId(), async job => {
         const view = executionView("workspace", resolve(ctx.cwd, input.cwd ?? "."), (text, details) => onUpdate?.(result(text, false, details)));
         view.start();
-        if(input.background){
-          const details=await startBackground(lookup(input.job),ctx.sessionManager.getSessionId(),input.entry,input.args??[],"workspace",{...options(input.purpose,input.cwd,input.timeoutSeconds,ctx,ownedSignal,undefined),test:input.test,onProgress:view.onProgress},{...input.background,startupSeconds:input.timeoutSeconds});
-          return result(backgroundSummary(input.purpose,details),false,details);
+        if (input.background) {
+          const details = await startBackground(job, job.sessionId, input.entry, input.args ?? [], "workspace", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), test: input.test, onProgress: view.onProgress }, { ...input.background, startupSeconds: input.timeoutSeconds });
+          stored(job, "Background workspace remains until explicit release");
+          return result(backgroundSummary(input.purpose, details), false, details);
         }
-        const completed = await runForeground(lookup(input.job), ctx.sessionManager.getSessionId(), input.entry, input.args ?? [], "workspace", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), test: input.test, onProgress: view.onProgress, onSource: view.onSource });
-        if(!completed.record) return result(backgroundSummary(input.purpose,completed),false,completed);
-        if(completed.source) view.onSource(completed.source);
-        const output=completed.record;
+        const completed = await runForeground(job, job.sessionId, input.entry, input.args ?? [], "workspace", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), test: input.test, onProgress: view.onProgress, onSource: view.onSource });
+        if (!completed.record) {
+          stored(job, "Waiting interrupted; workspace remains until explicit release");
+          return result(backgroundSummary(input.purpose, completed), false, completed);
+        }
+        if (completed.source) view.onSource(completed.source);
+        const output = completed.record;
         const details = view.finish(output, { state: "retained", reason: "Workspace available for edits and reruns until explicit release" });
+        stored(job, details.retention?.reason ?? "Workspace remains until explicit release");
         return result(executionText(details), output.status !== "succeeded", details);
-      });
+      }));
     },
   });
   pi.registerTool({
@@ -188,7 +221,7 @@ export default function tempScripts(pi: ExtensionAPI): void {
       "For script_job workspaces, normal file tools author scripts. Do not edit manifests, leases, dependency metadata, or recorded runs.",
     ],
     parameters: Type.Object({ action: Type.Union([Type.Literal("create"), Type.Literal("list"), Type.Literal("inspect"),Type.Literal("status"),Type.Literal("logs"),Type.Literal("stop"), Type.Literal("dependencies"), Type.Literal("retain"), Type.Literal("pin"), Type.Literal("release"), Type.Literal("cleanup")]), job: Type.Optional(Type.String()), jobs: Type.Optional(Type.Array(Type.String(), { minItems: 1, maxItems: 50 })), purpose: Type.Optional(purposeSchema), dependencies: Type.Optional(Type.Record(Type.String(), Type.String())), timeoutSeconds: Type.Optional(timeoutSchema) }),
-    executionMode: "sequential", ...jobRenderers,
+    executionMode: "sequential", ...jobRenderers(id => references.get(id)?.purpose),
     async execute(_id, input, signal, onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();
       if (input.job && input.jobs) throw new Error("Use job or jobs, not both");
@@ -198,29 +231,37 @@ export default function tempScripts(pi: ExtensionAPI): void {
         if (!selected.length) throw new Error("Lifecycle actions require job or jobs");
         const targets = selected.map(id => lookup(id));
         const messages: string[] = [];
+        const identities: JobIdentity[] = [];
         let failed = false;
         for (const reference of targets) {
+          let identity = { id: reference.id, purpose: reference.purpose ?? "Managed job" };
           try {
+            const job = await inspectJob(reference, sessionId);
+            identity = { id: job.id, purpose: job.purpose };
+            onUpdate?.(result(`${input.action}: ${job.purpose}\nJob: ${job.id}`, false, { kind: "script-job", jobs: [...identities, identity] }));
             if (input.action === "release" || input.action === "cleanup") {
               if (input.action === "release") await releaseJob(reference, sessionId);
               else await cleanupJob(reference, sessionId);
               forget(reference);
-              messages.push(`Removed job ${reference.id}: owned source, dependencies, artifacts, and logs deleted.`);
+              messages.push(`Removed job: ${job.purpose}\nJob: ${job.id}\nOwned source, dependencies, artifacts, and logs deleted.`);
             } else {
-              const job = await setRetention(reference, sessionId, input.action === "pin" ? "pinned" : "open");
-              messages.push(`Job ${job.id}: ${job.state}; retained until explicit release. This storage is not a backup.`);
+              const retained = await setRetention(reference, sessionId, input.action === "pin" ? "pinned" : "open");
+              stored(retained, "Retained until explicit release; this storage is not a backup");
+              messages.push(`${retained.purpose}\nJob: ${retained.id}\nRetention: ${retained.state}; retained until explicit release. This storage is not a backup.`);
             }
           } catch {
             failed = true;
-            messages.push(`Job ${reference.id}: operation failed; inspect ownership, state, and process lease before retrying.`);
+            messages.push(`${identity.purpose}\nJob: ${reference.id}\nOperation failed; inspect ownership, state, and process lease before retrying.`);
           }
+          identities.push(identity);
         }
-        return result(messages.join("\n"), failed);
+        return result(messages.join("\n\n"), failed, { kind: "script-job", jobs: identities });
       }
       if (input.action === "create") {
         if (!input.purpose) throw new Error("create requires purpose");
         const job = await createJob(sessionId, input.purpose, register);
-        return result(`Job: ${job.id}\nSource directory: ${join(job.root, "work")}\nCreate entry: ${join(job.root, "work", "main.mjs")}\nRetention: open\nUse active session file tools with their existing safeguards on these paths.`);
+        stored(job, "Editable workspace remains until explicit release");
+        return result(`Job: ${job.id}\nPurpose: ${job.purpose}\nSource directory: ${join(job.root, "work")}\nCreate entry: ${join(job.root, "work", "main.mjs")}\nRetention: open\nUse active session file tools with their existing safeguards on these paths.`, false, { kind: "script-job", jobs: [{ id: job.id, purpose: job.purpose }] });
       }
       if (input.action === "list") {
         const entries: string[] = [];

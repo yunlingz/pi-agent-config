@@ -1,8 +1,9 @@
-import { highlightCode, type Theme } from "@earendil-works/pi-coding-agent";
+import { highlightCode, type Theme, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import type { TSchema } from "typebox";
 import { commandText } from "./commands.ts";
 import { displayText } from "./process.ts";
-import type { ExecutionDetails, SourceView } from "./types.ts";
+import type { ExecutionDetails, JobIdentity, ScriptDetails, SourceView } from "./types.ts";
 
 interface RenderContext {
   cwd: string;
@@ -96,13 +97,44 @@ export const workspaceRenderers = {
   renderResult: executionResult,
 };
 
-export const jobRenderers = {
-  renderCall(args: { action?: string; job?: string; jobs?: string[] }, theme: Theme) {
-    return new Text(theme.fg("toolTitle", theme.bold("Script job")) + theme.fg("accent", ` · ${args.action ?? "…"}`) + theme.fg("dim", args.jobs ? ` · ${args.jobs.length} jobs` : args.job ? ` · ${args.job}` : ""), 0, 0);
-  },
-  renderResult(value: { content: { type: string; text?: string }[]; details?: ExecutionDetails }, view: { expanded: boolean; isPartial: boolean }, theme: Theme, context: RenderContext) {
-    if (value.details?.kind === "script-execution") return executionResult(value, view, theme, context);
-    const text = `\n${displayText(value.content.map(block => block.text ?? "").join("\n"))}`;
-    return view.expanded ? new Text(text, 0, 0) : new Preview(text, 8, false, theme.fg("dim", context.keyHint("app.tools.expand", "to inspect job details")));
-  },
-};
+interface JobCallArgs {
+  action?: string;
+  job?: string;
+  jobs?: string[];
+  purpose?: string;
+}
+
+interface JobRenderState {
+  jobs?: JobIdentity[];
+  header?: Text;
+}
+
+type JobRenderContext = Omit<Parameters<NonNullable<ToolDefinition<TSchema, ScriptDetails, JobRenderState>["renderResult"]>>[3], "args"> & { args: JobCallArgs };
+
+function jobCallText(args: JobCallArgs, jobs: JobIdentity[], theme: Theme, expanded: boolean): string {
+  const heading = theme.fg("toolTitle", theme.bold("Script job")) + theme.fg("muted", ` · ${args.action ?? "…"}`);
+  if (!jobs.length) return heading + (args.purpose ? theme.fg("accent", ` · ${displayText(args.purpose)}`) : "");
+  if (jobs.length === 1) return heading + theme.fg("accent", ` · ${displayText(jobs[0].purpose)}`) + (expanded ? theme.fg("dim", `\nJob: ${jobs[0].id}`) : "");
+  return `${heading}${theme.fg("dim", ` · ${jobs.length} jobs`)}\n${jobs.map((job, index) => `${theme.fg("dim", index === jobs.length - 1 ? "└─" : "├─")} ${theme.fg("accent", displayText(job.purpose))}${expanded ? theme.fg("dim", ` · ${job.id}`) : ""}`).join("\n")}`;
+}
+
+export function jobRenderers(purposeFor: (id: string) => string | undefined) {
+  return {
+    renderCall(args: JobCallArgs, theme: Theme, context: JobRenderContext) {
+      const selected = args.jobs ?? (args.job ? [args.job] : []);
+      const jobs = context.state.jobs ?? selected.map(id => ({ id, purpose: purposeFor(id) ?? id }));
+      const header = new Text(jobCallText(args, jobs, theme, context.expanded), 0, 0);
+      context.state.header = header;
+      return header;
+    },
+    renderResult(value: { content: { type: string; text?: string }[]; details?: ScriptDetails }, view: { expanded: boolean; isPartial: boolean }, theme: Theme, context: JobRenderContext) {
+      if (value.details?.kind === "script-execution") return executionResult({ ...value, details: value.details }, view, theme, context);
+      if (value.details?.kind === "script-job") {
+        context.state.jobs = value.details.jobs;
+        context.state.header?.setText(jobCallText(context.args, value.details.jobs, theme, view.expanded));
+      }
+      const text = `\n${displayText(value.content.map(block => block.text ?? "").join("\n"))}`;
+      return view.expanded ? new Text(text, 0, 0) : new Preview(text, 8, false, theme.fg("dim", context.keyHint("app.tools.expand", "to inspect job details")));
+    },
+  };
+}

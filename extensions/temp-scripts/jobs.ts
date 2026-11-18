@@ -15,7 +15,8 @@ export function inside(root: string, target: string): boolean {
 
 export function jobReference(value: unknown): value is JobReference {
   return value !== null && typeof value === "object" && "id" in value && typeof value.id === "string"
-    && "root" in value && typeof value.root === "string" && "token" in value && typeof value.token === "string";
+    && "root" in value && typeof value.root === "string" && "token" in value && typeof value.token === "string"
+    && (!("purpose" in value) || typeof value.purpose === "string");
 }
 
 export async function saveManifest(job: JobManifest): Promise<void> {
@@ -52,7 +53,7 @@ export async function createJob(sessionId: string, purpose: string, register: (j
   try {
     const job: JobManifest = { format: 1, id: randomUUID(), root, token: randomUUID(), sessionId, purpose, createdAt: Date.now(), state: "open", dependencies: {} };
     await saveManifest(job);
-    register({ id: job.id, root, token: job.token });
+    register({ id: job.id, root, token: job.token, purpose });
     registered = true;
     await mkdir(join(root, "work"), { mode: 0o700 });
     await mkdir(join(root, "runs"), { mode: 0o700 });
@@ -106,7 +107,10 @@ export async function finishInline(reference: JobReference, sessionId: string, o
   if (output.status !== "succeeded") return { state: "retained", reason: `Execution ${output.status}; diagnostic evidence preserved` };
   if (keep) return { state: "retained", reason: "Explicit keep request" };
   if (output.truncated || output.commandsTruncated || output.commands.some(command => command.truncated)) return { state: "retained", reason: "Output or command evidence is truncated" };
-  if (output.commands.some(command => command.status !== "succeeded")) return { state: "retained", reason: "Unsuccessful or unfinished child command evidence" };
+  if (output.commands.some(command => command.status !== "succeeded"
+    && !(command.status === "failed" && command.failureAccepted && command.exitCode !== null && command.exitCode !== undefined && command.exitCode !== 0))) {
+    return { state: "retained", reason: "Unsuccessful or unfinished child command evidence" };
+  }
   try {
     await inspectJob(reference, sessionId);
     const rootEntries = await readdir(reference.root);

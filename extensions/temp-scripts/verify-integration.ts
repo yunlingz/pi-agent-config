@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { Component } from "@earendil-works/pi-tui";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { testTUI, testUI } from "../../scripts/test-fixtures.ts";
@@ -68,11 +69,28 @@ try {
   const errors: unknown[] = [];
   const statuses = new Map<string, string>();
   const notifications: string[] = [];
+  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", installation)).href);
+  sdk.initTheme("dark", false);
+  const widgets = new Map<string, Component>();
+  let widgetRegistrations = 0;
+  let toolsExpanded = false;
+  const widgetTheme = testUI(session, {}).theme;
+  const widgetText = (key = "temp-scripts-retention", width = 120) => widgets.get(key)?.render(width).map(stripVTControlCharacters).join("\n") ?? "";
   await session.bindExtensions({ mode: "tui", uiContext: testUI(session, {
     setStatus(key, value) { if (value === undefined) statuses.delete(key); else statuses.set(key, value); },
     notify(message) { notifications.push(message); },
+    getToolsExpanded() { return toolsExpanded; },
+    setWidget(key, content, options) {
+      widgets.delete(key);
+      if (content === undefined) return;
+      assert.equal(options?.placement, "aboveEditor");
+      widgetRegistrations++;
+      widgets.set(key, Array.isArray(content) ? new tui.Text(content.join("\n"), 0, 0) : content(testTUI(new tui.Container()), widgetTheme));
+    },
   }), onError: error => errors.push(error) });
   assert.equal(statuses.get(STATUS_KEY), "scripts: on");
+  assert.equal(widgetRegistrations, 2);
+  assert.equal(widgetText(), "");
   const execute = async (name: string, args: ToolCall["arguments"], error = false): Promise<string> => {
     const id = `fixture-${++count}`;
     pending = { type: "toolCall", id, name, arguments: args };
@@ -104,6 +122,8 @@ try {
   const id = /^Job: (.+)$/mu.exec(created)?.[1];
   const work = /^Source directory: (.+)$/mu.exec(created)?.[1];
   assert(id && work);
+  assert.match(widgetText(), /└─ ○ Author through normal tools \(retained\)/u);
+  assert(!widgetText().includes(id));
   const path = join(work, "main.mjs");
   await execute("write", { path, content: 'console.log("before");\n' });
   const read = await execute("read", { path });
@@ -136,6 +156,13 @@ try {
   assert.equal(retained.retention?.state,"retained");
   assert(retained.record);
   assert(existsSync(retained.record.stdoutPath));
+  assert.match(widgetText(), /Retained inline fixture \(retained\)/u);
+  const acceptedCode = 'const {exec}=await import(process.env.PI_SCRIPT_RUNTIME);const child=await exec("git",["config","--file",process.env.PI_SCRIPT_WORK+"/absent.gitconfig","--get","core.hooksPath"],{timeoutSeconds:2,allowFailure:true});if(child.exitCode!==1)throw new Error("Wrong Git status");';
+  await execute("script_inline", { purpose: "Expected absent Git setting", code: acceptedCode, timeoutSeconds: 5 });
+  const accepted = executionDetails();
+  assert.equal(accepted.retention?.state, "removed");
+  assert.equal(accepted.commands[0]?.failureAccepted, true);
+  assert(!widgetText().includes("Expected absent Git setting"));
   const projectScript = join(temporary, "existing.mjs");
   await writeFile(projectScript, 'console.log("established workflow");\n');
   await execute("read", { path: projectScript });
@@ -150,6 +177,7 @@ try {
   session.setActiveToolsByName(session.getActiveToolNames().filter(name => name !== "bash"));
   assert(!session.getActiveToolNames().includes("bash"));
   assert.match(await execute("script_inline", { purpose: "No Bash dependency", code: 'console.log("without-bash");', timeoutSeconds: 5 }), /without-bash/u);
+  assert.equal(widgetRegistrations, 2, "Updates must redraw the reserved widgets without changing insertion order");
   await session.reload();
   assert.match(await execute("script_job", { action: "inspect", job: id }), /Author through normal tools/u);
   assert.match(await execute("script_js", { job: id, entry: "main.mjs", purpose: "Rerun after reload", timeoutSeconds: 5 }), /native/u);
@@ -191,7 +219,6 @@ try {
   await session.reload();
   assert(session.getActiveToolNames().includes("script_inline"));
 
-  const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", installation)).href);
   sdk.initTheme("dark", false);
   const definition = session.getToolDefinition("script_inline");
   assert(definition);
@@ -223,13 +250,48 @@ try {
   console.log("PASS: live-tail rendering at three widths, toggle/status, disabled gate restoration, retained files, and reload preference");
   await execute("script_job", { action:"pin",jobs:[id,retained.record.job] });
   assert(existsSync(path));
-  await execute("script_job", { action:"release",jobs:[id,retained.record.job] });
+  const released = await execute("script_job", { action:"release",jobs:[id,retained.record.job] });
+  assert.match(released, /Removed job: Author through normal tools/u);
+  assert.match(released, /Removed job: Retained inline fixture/u);
+  assert(!widgetText().includes("Author through normal tools"));
+  assert(!widgetText().includes("Retained inline fixture"));
+  const jobDefinition = session.getToolDefinition("script_job");
+  assert(jobDefinition);
+  const releaseMessage = session.messages.findLast(value => value.role === "toolResult" && value.toolName === "script_job");
+  assert(releaseMessage?.role === "toolResult");
+  const releaseComponent = new sdk.ToolExecutionComponent("script_job", "release-render", { action: "release", jobs: [id, retained.record.job] }, {}, jobDefinition, testTUI(new tui.Container()), temporary);
+  releaseComponent.setArgsComplete();
+  releaseComponent.updateResult({ content: releaseMessage.content, details: releaseMessage.details, isError: false }, false);
+  for (const width of [120, 60, 24]) {
+    const lines = releaseComponent.render(width).map(stripVTControlCharacters);
+    assert(lines.join("").replace(/\s/gu, "").includes("Authorthroughnormaltools"));
+    assert(lines.every(line => tui.visibleWidth(line) <= width));
+  }
   assert(!existsSync(dirname(work)));
   assert(!existsSync(retained.record.stdoutPath));
   await session.reload();
   const listed = await execute("script_job", {action:"list"});
   assert(!listed.includes(id));
   assert(!listed.includes(retained.record.job));
+  const overflowIds: string[] = [];
+  for (let index = 0; index < 14; index++) {
+    const created = await execute("script_job", { action: "create", purpose: `Stored fixture ${index} 界` });
+    const id = /^Job: (.+)$/mu.exec(created)?.[1];
+    assert(id);
+    overflowIds.push(id);
+  }
+  for (const width of [120, 60, 24]) {
+    const lines = widgets.get("temp-scripts-retention")?.render(width) ?? [];
+    assert(lines.length <= 13);
+    assert(lines.every(line => tui.visibleWidth(line) <= width));
+  }
+  assert.match(widgetText(), /\+\d+ more/u);
+  toolsExpanded = true;
+  assert(widgetText().includes("Stored fixture 13"));
+  assert(widgetText().includes(overflowIds[13]));
+  toolsExpanded = false;
+  await execute("script_job", { action: "release", jobs: overflowIds });
+  assert(!widgetText().includes("Stored fixture"));
   assert.deepEqual(errors, []);
   assert.equal(networkAttempts, 0);
   console.log("PASS: discovery; three JS-only tools; native/CodeAnchor authoring; stale edits; AST application; blanket and nested shell gates; managed Git/project Node execution; Bash-disabled execution; reload; release/cleanup; zero external model/network requests");

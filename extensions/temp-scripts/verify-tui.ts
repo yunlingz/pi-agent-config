@@ -43,9 +43,9 @@ try {
   const root = dirname(fileURLToPath(import.meta.url));
   await symlink(root, join(agent, "extensions", "temp-scripts"), process.platform === "win32" ? "junction" : "dir");
   await mkdir(workspace);
-  await writeFile(join(agent, "settings.json"), JSON.stringify({ packages: [], extensions: ["-builtin:mcp"], defaultProvider: "scripts-terminal-fixture", defaultModel: "fixture", quietStartup: true, retry: { enabled: false }, compaction: { enabled: false }, cacheWarming: "off", powerline: { welcome: false, autoFollowUp: false, git: { polling: "off" }, customItems: [{ id: "temp_scripts", statusKey: "temp-scripts", position: "left", color: "muted" }], layout: { left: ["custom:temp_scripts", "path"], right: [] } } }));
+  await writeFile(join(agent, "settings.json"), JSON.stringify({ packages: [resolve(footerDirectory)], extensions: ["-builtin:mcp"], defaultProvider: "scripts-terminal-fixture", defaultModel: "fixture", quietStartup: true, retry: { enabled: false }, compaction: { enabled: false }, cacheWarming: "off", powerline: { welcome: false, autoFollowUp: false, git: { polling: "off" }, customItems: [{ id: "temp_scripts", statusKey: "temp-scripts", position: "left", color: "muted" }], layout: { left: ["custom:temp_scripts", "path"], right: [] } } }));
   const info = JSON.parse(await readFile(join(installation, "package.json"), "utf8")) as { bin: { pi: string } };
-  terminal = pty.spawn(process.execPath, [resolve(installation, info.bin.pi), "--offline", "--no-approve", "--no-mcp", "--no-session", "--no-skills", "--no-context-files", "--no-themes", "--no-prompt-templates", "--extension", resolve(footerDirectory), "--extension", join(root, "tui-fixture.ts"), "--tui-mode", "fullscreen"], {
+  terminal = pty.spawn(process.execPath, [resolve(installation, info.bin.pi), "--offline", "--no-approve", "--no-mcp", "--no-session", "--no-skills", "--no-context-files", "--no-themes", "--no-prompt-templates", "--extension", join(root, "tui-fixture.ts"), "--tui-mode", "fullscreen"], {
     cols: 120, rows: 36, cwd: workspace, name: "xterm-256color", env: { ...process.env, PI_TEMP_SCRIPTS_DIR:join(temporary,"script-storage"), PI_CODING_AGENT_DIR: agent, TEMP_SCRIPTS_TUI_DIRECTORY: workspace, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PI_PROGRAM_STATUS: "0", TERM: "xterm-256color", COLORTERM: "truecolor" },
   });
   const child = terminal;
@@ -77,6 +77,7 @@ try {
   assert(visible().includes("Inline JS"));
   assert(visible().includes("INLINE_SOURCE_VISIBLE"));
   assert(visible().includes("Commands ("));
+  await wait("adding the running job to the retention panel", () => /◐ Terminal streaming fixture \(running\)/u.test(visible()));
   assert(!(await traces()).some(value => value.event === "settled"));
   await wait("updating elapsed time while running", () => /elapsed 1\.\ds/u.test(visible()));
   await wait("showing stderr and final output", () => visible().includes("TUI_STDERR") && visible().includes("TUI_LATE"));
@@ -100,11 +101,47 @@ try {
   assert(visible().includes("WORKSPACE_SOURCE_VISIBLE"));
   assert((await traces()).filter(value=>value.event==="job").every(value=>value.root && !existsSync(value.root)));
   output = "";
+  child.resize(121, 180);
+  await wait("named workspace release header", () => /Script job · release · Terminal workspace/u.test(visible()));
+  const beforeRetained = (await traces()).filter(value => value.event === "settled").length;
+  child.write("Run the retention fixture.\r");
+  await wait("showing a running retained helper", () => /◐ Terminal retained fixture \(running\)/u.test(visible()));
+  await wait("keeping the retained job visible after success", async () => (await traces()).filter(value => value.event === "settled").length > beforeRetained);
+  const retainedRoot = (await traces()).findLast(value => value.event === "job")?.root;
+  assert(retainedRoot && existsSync(retainedRoot));
+  output = "";
+  child.resize(119, 60);
+  await wait("retention panel above Powerline", () => visible().includes("Job retention (") && /scripts:\s*on/u.test(visible()));
+  assert(visible().lastIndexOf("Job retention (") < visible().lastIndexOf("scripts:"));
+  assert(/└─ ○ Terminal retained fixture \(retained\)/u.test(visible()), "The retained row must use the compact Todo-style layout");
+  const retainedStarts = (await traces()).filter(value => value.event === "start").length;
+  output = "";
+  child.write("/reload\r");
+  await wait("restoring retained jobs after reload", async () => (await traces()).filter(value => value.event === "start").length > retainedStarts);
+  await wait("retained-job reload completed", () => visible().includes("Reloaded keybindings"));
+  output = "";
+  child.resize(118, 60);
+  await wait("retention panel restored above Powerline", () => visible().includes("Job retention (") && /scripts:\s*on/u.test(visible()));
+  assert(visible().lastIndexOf("Job retention (") < visible().lastIndexOf("scripts:"));
+  const beforeRelease = (await traces()).filter(value => value.event === "settled").length;
+  child.write("Please release retained records.\r");
+  await wait("named release removes retained files", async () => (await traces()).filter(value => value.event === "settled").length > beforeRelease);
+  assert(!existsSync(retainedRoot));
+  output = "";
+  child.resize(116, 100);
+  await wait("named retained-job release header", () => /Script job · release · Terminal retained fixture/u.test(visible()));
+  output = "";
+  child.resize(117, 60);
+  await wait("Powerline redraw after release", () => /scripts:\s*on/u.test(visible()));
+  assert(!visible().includes("Job retention ("));
+  output = "";
   child.write("/temp-scripts off\r");
   assert(!(await checkpoint())?.tools?.includes("script_inline"));
   await wait("off Powerline status", () => /scripts:\s*off/u.test(visible()));
+  output = "";
   child.write("/reload\r");
   await wait("restoring disabled state after reload", async () => (await traces()).filter(value => value.event === "start").length >= 2);
+  await wait("disabled-state reload completed", () => visible().includes("Reloaded keybindings"));
   assert(!(await checkpoint())?.tools?.includes("script_inline"));
   output = "";
   child.write("/temp-scripts on\r");
@@ -121,11 +158,17 @@ try {
   await wait("new user query while background work runs",async()=> (await traces()).filter(value=>value.event==="settled").length>snapshotsBefore);
   child.resize(99,40); // Force a full redraw; incremental terminal output need not repeat an unchanged panel heading.
   await wait("background panel stays near editor",()=>visible().includes("Background jobs"));
+  await wait("both job panels remain above Powerline", () => visible().includes("Job retention (") && /scripts:\s*on/u.test(visible()));
+  assert(visible().lastIndexOf("Background jobs (") < visible().lastIndexOf("scripts:"));
+  assert(visible().lastIndexOf("Job retention (") < visible().lastIndexOf("scripts:"));
+  console.log("RENDER: compact job panels\n" + visible().slice(visible().lastIndexOf("● Background jobs ("), visible().lastIndexOf("scripts:")));
   child.write("/script-jobs expand\r");
   await checkpoint();
   const starts=(await traces()).filter(value=>value.event==="start").length;
+  output = "";
   child.write("/reload\r");
   await wait("background controller restored after reload",async()=> (await traces()).filter(value=>value.event==="start").length>starts);
+  await wait("background reload completed", () => visible().includes("Reloaded keybindings"));
   await wait("fixed panel redraw after reload",()=>visible().includes("Background jobs"));
   const stopCount=(await traces()).filter(value=>value.event==="settled").length;
   child.write("Please stop service.\r");
@@ -153,7 +196,10 @@ try {
   assert.equal(exit?.exitCode, 0);
   await assertServiceStopped(quitRoot);
   assert(!(await traces()).some(value => value.event === "network" || value.error));
-  console.log("PASS: actual Pi TUI; inline/workspace/job headers; source after cleanup; commands; streaming; elapsed clock; resize/expansion; Powerline; fixed panel/reload; stop/release; native new-session and quit stop active services; zero network");
+  console.log("PASS: actual Pi TUI; named release; Todo-style job trees; retention start/keep/release; both panels above Powerline after redraw/reload; source; streaming; resize/expansion; stop/release; native new-session and quit stop active services; zero network");
+} catch (error) {
+  console.error(JSON.stringify({ phase, traces: (await traces()).slice(-12), terminalTail: stripVTControlCharacters(output).slice(-6000) }));
+  throw error;
 } finally {
   clearInterval(heartbeat);
   if (terminal && !exit) { terminal.kill(); if (exited) await exited; }

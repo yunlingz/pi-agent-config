@@ -13,8 +13,11 @@
   - Preserve retained evidence when termination or ownership is uncertain.
   - Compaction and reload must preserve jobs. Quit and session replacement must stop owned jobs.
   - Interruption cancels waiting, not execution; explicit stop terminates a job.
-  - Keep background status in a fixed editor widget, not periodic transcript messages.
+  - Keep background and retention status in fixed editor widgets, not periodic transcript messages.
+  - Follow Todo's compact tree design without importing Todo or sharing its state.
+  - Reserve panel slots before Powerline and redraw in place; do not reorder another extension's widgets.
   - Delete safe successful inline files automatically; keep workspace evidence until explicit immediate release.
+  - Accepted normal nonzero child exits must not retain otherwise safe inline runs. Preserve actual status and abnormal execution evidence.
   - Use private `~/.pi-temp-scripts` storage; do not migrate or scan legacy temporary jobs automatically.
 - **Guidance ownership**
   - Keep execution guidance in active tool metadata, not global `AGENTS.md` or README procedures.

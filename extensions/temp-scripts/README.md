@@ -46,8 +46,14 @@ For background execution, `timeoutSeconds` is a bounded startup deadline of at m
 The start call returns promptly; the agent can settle and accept later queries while the process runs.
 An optional loopback HTTP `readyUrl` checks application readiness. Without it, running does not prove readiness.
 
-The fixed panel above the editor displays active state, elapsed time, job identity, readiness, and recent output.
-Its compact tree layout uses semantic state colors and bounded rows. `/script-jobs expand` and `/script-jobs collapse` change its detail level.
+The fixed background panel displays compact tree rows with job names, state markers, elapsed time, and recent output.
+Its layout follows Todo's visual conventions without importing Todo or sharing its state.
+The retention panel adds each job at startup, keeps stored jobs visible, and removes entries after successful cleanup or release.
+With standard global loading, both panels stay above Powerline through redraw and reload.
+Empty panels render no lines. Reserved startup slots preserve their position; refreshes do not reinsert widgets.
+`/script-jobs expand` and Pi's tool-output expansion reveal IDs, retention reasons, readiness details, and more output.
+`/script-jobs collapse` returns to the compact view when Pi's tool-output expansion is off.
+The compact budget is twelve content rows per panel, plus a trailing spacer. Running jobs appear before stopped jobs.
 Periodic panel updates do not add transcript messages or model requests.
 `script_job status`, `logs`, and `stop` inspect or stop the existing job without restarting it.
 
@@ -82,6 +88,9 @@ await exec("git", ["status", "--short"], {
 Inside an explicitly background run, a child command can omit its options object and inherit the parent's lifetime.
 It uses executable/argument arrays and `shell: false`. Output streams automatically to the parent run.
 A failed command throws unless `allowFailure: true` requests explicit result inspection.
+When a successful parent accepts a normal nonzero child exit, that exit alone does not retain safe inline files.
+The command row still shows its actual failure status and accepted exit code.
+Timeouts, signals, incomplete evidence, truncation, and uncertain termination still prevent automatic cleanup.
 Results retain exit code, signal, status, elapsed time, output tail, and child-log paths.
 No shell quoting or expansion applies to arguments.
 
@@ -98,6 +107,7 @@ Pi normally inherits shell configuration already established before startup.
 ## Output and lifecycle
 
 Headers distinguish `Inline JS`, `Workspace JS`, and `Script job` actions.
+Job actions show purpose names instead of bare IDs, including after release and transcript reload.
 Inline source appears before output; workspace source comes from the executed snapshot, not a later edit.
 Separate section budgets keep source, actual child command events, and recent output visible.
 Expansion reveals complete submitted inline source, bounded snapshot source, commands, output, and execution metadata.
@@ -137,6 +147,20 @@ Explicit `script_job release` deletes stopped owned source, dependencies, artifa
 Deletion writes a session tombstone, so removed registrations do not reappear after reload or compaction.
 Cleanup verifies exact ownership and absence afterward. Requested deliverables belong in an approved destination before release.
 The scratch directory is not a backup, even when jobs are pinned.
+
+Compact panels use this layout:
+
+```text
+● Background jobs (1/1 active)
+└─ ◐ Run the local service (running · 34s · ready)
+   Listening on the configured loopback address
+
+○ Job retention (2 stored)
+├─ ○ Check remote refs (retained)
+└─ ◆ Keep diagnostic records (pinned)
+```
+
+Retained jobs do not fade between turns. Releasing a job removes it from both panels.
 
 `script_job dependencies` accepts exact package versions and installs within the job only.
 Resolution uses `https://packagefeedproxy.microsoft.io/npm/`, Microsoft feed tarball hosts, a retained lockfile, disabled lifecycle scripts, and explicit deadlines.
