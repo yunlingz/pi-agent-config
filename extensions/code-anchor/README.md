@@ -81,7 +81,9 @@ Summary omissions are not counted as displayed edit anchors; the footer gives co
 
 Tool metadata favors AST search for supported code structures and hashline edits for context-specific changes.
 Syntax-defined transformations use staged AST rewrites, including single-occurrence changes.
-Pi's `grep`, `find`, and `ls` complement these tools; `bash` remains available for missing capabilities and failures.
+Pi's `grep`, `find`, and `ls` are preferred over command execution for text search and file discovery.
+When native tools cannot meet the requirement, command execution supplies `rg` or `rg --files` within active execution restrictions.
+Tool descriptions and active prompt guidelines carry CodeAnchor's search, inspection, editing, and recovery procedures.
 The extension does not block or rewrite shell commands to enforce tool preferences.
 When CodeAnchor is disabled, its tool-specific prompt guidelines leave Pi's prompt with the overridden definitions.
 Native Pi renderers handle reads and ordinary writes, including their collapsed and expanded views.
@@ -186,8 +188,11 @@ It also performs native manual compaction, checks persisted file metadata, reloa
 Its temporary project settings retain no recent history for that compaction case; global settings remain unchanged.
 Live tests use temporary fixtures and retain the configured provider, model, and reasoning level.
 They do not certify every model-generated edit.
-`scripts/verify-tool-selection.ts` checks natural tool choice with all seven selected built-ins and both AST tools available.
+`scripts/verify-tool-selection.ts` checks natural tool choice without global instructions, with all seven selected built-ins and both AST tools available.
 Its task prompts do not name tools; assertions cover discovery, structural/text search, unsupported syntax, both editing methods, and disabled AST fallback.
+Integration checks cover guidance from all five CodeAnchor tool definitions in Pi's prompt and local provider requests.
+They also check guidance removal and exact native-definition restoration when disabled, plus guidance restoration after re-enable and reload.
+The live session verifier checks active guidance after real manual compaction and reload.
 The integration verifier also renders actual tool results through Pi's renderer resolution and tool component.
 It checks folding, expansion, resizing, wide characters, target headers, and unchanged model-facing results at 24, 60, and 120 columns.
 

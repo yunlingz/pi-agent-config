@@ -35,7 +35,6 @@ try {
   for (const [path, content] of fixtures) {
     await writeFile(join(temporary, path), content);
   }
-  const guidance = await readFile(join(agentDirectory, "AGENTS.md"), "utf8");
   const live = await createLiveSession({
     packageDirectory,
     agentDirectory,
@@ -43,7 +42,6 @@ try {
     extensionPaths: [join(agentDirectory, "extensions", "code-anchor", "index.ts")],
     includeBuiltinTools: true,
     appendSystemPrompt: [
-      guidance,
       "This verification uses synthetic fixtures. Only files explicitly requested by each task may change.",
       "Do not browse or use MCP. Files outside this temporary workspace are outside the task scope.",
     ],
@@ -60,6 +58,7 @@ try {
   assert.equal(session.thinkingLevel, reasoning);
   const extensionErrors: unknown[] = [];
   await session.bindExtensions({ mode: "json", onError: error => extensionErrors.push(error) });
+  assert(!session.systemPrompt.includes("## Inspect code and choose tools"), "Natural selection must not depend on global tool procedures");
   const builtinNames = ["read", "bash", "edit", "write", "grep", "find", "ls"];
   for (const name of [...builtinNames, "ast_grep", "ast_edit"]) {
     assert(session.getActiveToolNames().includes(name), `Missing tool-selection candidate: ${name}`);
@@ -135,7 +134,13 @@ try {
   for (const name of builtinNames) {
     assert(session.getActiveToolNames().includes(name), `Disabling CodeAnchor removed ${name}`);
   }
-  await runCase("disabled structural fallback", "Find every actual cache.save(...) call under src and report its filename and arguments. Do not change files.", ["grep"]);
+  const fallback = await runCase("disabled structural fallback", "Find every actual cache.save(...) call under src and report its filename and arguments. Do not change files.", []);
+  // When AST tools are off, native search or inspection can satisfy this small, previously inspected scope.
+  assert(toolOutcomes.some(outcome => outcome.phase === phase && !outcome.failed && ["grep", "read"].includes(outcome.tool)),
+    "Disabled fallback must use native search or inspection");
+  for (const marker of ["alpha.ts", "beta.ts", "first", "second"]) assert(fallback.includes(marker), `Disabled fallback omitted ${marker}`);
+  assert.match(fallback, /value\W+1/u);
+  assert.match(fallback, /value\W+2/u);
   await checkFixtures();
   console.log("PASS: seven natural tasks; no task prompt named tools; all selected built-ins remained available; configured model and reasoning retained");
 } catch (error) {

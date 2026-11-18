@@ -70,12 +70,14 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
     }
     pi.registerTool({
       name: "read", label: "Read · CodeAnchor",
-      description: "Read files with snapshot-tagged hashline anchors. Put optional line selectors in path: :N-M, :N+K, :N-, :-N, or comma ranges. :raw returns exact text without anchors; combine it with a range. Non-raw single ranges include surrounding context and syntax boundaries. Images use Pi's standard reader. Output is limited to 2000 lines or 50KB.",
+      description: "Inspect files with snapshot-tagged hashline anchors before editing. Bare code reads can summarize supported syntax. Put optional line selectors in path: :N-M, :N+K, :N-, :-N, or comma ranges. :raw returns exact text without anchors; combine it with a range. Non-raw single ranges include surrounding context and syntax boundaries. Images use Pi's standard reader. Output is limited to 2000 lines or 50KB.",
       promptSnippet: "Inspect files and obtain snapshot-tagged hashline anchors",
       promptGuidelines: [
-        "Use read to inspect implementations, control flow, and surrounding context after structural or text searches.",
+        "Use read to inspect implementations, control flow, arguments, and data transformations after structural or text searches.",
+        "When relevant paths are known, use read or ast_grep directly instead of discovering files again.",
         "Use read before edit or ast_edit. For hashline edit, copy the latest [path#TAG] header and source line numbers.",
         "A bare read can summarize code. Re-read needed omitted ranges; never invent hidden source or anchors.",
+        "When practical, batch independent read calls.",
       ],
       parameters: Type.Object({
         path: Type.String(),
@@ -97,13 +99,15 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
     });
     pi.registerTool({
       name: "edit", label: "Edit · CodeAnchor",
-      description: "Apply snapshot-checked hashline edits for context-specific changes. Prefer ast_edit when syntax defines the targets and transformation. Input starts with [path#TAG]. PUT N.=M: replaces lines with +payload rows; PUT <N: or PUT >N: inserts; CUT N.=M deletes; N* selects a syntax block. PUT >$: appends. CUT ranges and PUT targets can use @register. REM deletes a file; MV path moves it. Use write to create files.",
+      description: "Apply snapshot-checked hashline edits for context-specific changes. When supported syntax defines both targets and transformation, prefer ast_edit. Input starts with [path#TAG]. PUT N.=M: replaces lines with +payload rows; PUT <N: or PUT >N: inserts; CUT N.=M deletes; N* selects a syntax block. PUT >$: appends. CUT ranges and PUT targets can use @register. REM deletes a file; MV path moves it. Use write to create files.",
       promptSnippet: "Apply context-specific changes with snapshot-checked hashline anchors",
       promptGuidelines: [
-        "Use edit for context-specific code, local control flow, prose, comments, and exact-line changes; prefer ast_edit for reliable syntax-defined transformations.",
-        "Use edit with snapshot tags from read. Batch related operations under one file header; never invent a tag.",
-        "When edit reports stale anchors, re-read the affected range before retrying. Keep replacements as small as correctness permits.",
-        "When ast_edit is unsupported or unreliable, inspect current source with read and fall back to hashline edit.",
+        "Use edit for context-specific code, local control flow, prose, comments, and exact-line changes.",
+        "For edit, use current snapshot tags and source line numbers from read. Batch related operations under one file header.",
+        "Never invent edit tags or omitted source. When edit reports stale anchors, re-read the affected range before retrying.",
+        "When ast_edit is unsupported or unreliable, inspect current source with read and use hashline edit.",
+        "For edit, select the smallest correct change. Match count alone must not determine whether to use ast_edit.",
+        "After edit, review the resulting diff and run applicable checks. Edit application does not prove behavioral correctness.",
       ],
       parameters: Type.Object({ input: Type.String({ minLength: 1 }) }),
       executionMode: "sequential",
@@ -124,20 +128,25 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
     });
     pi.registerTool({
       name: "ast_grep", label: "AST Grep · CodeAnchor",
-      description: `Prefer structural search for calls, constructors, imports, declarations, assignments, and repeated syntax during code exploration. Use $NAME for one capture and $$$NAME for multiple nodes. Paths accept files, directories, or globs; separate targets with semicolons. Returns 50 matches per page. ${grammarDescription}`,
+      description: `When supported, prefer structural search for calls, constructors, imports, declarations, assignments, and repeated syntax. Prefer Pi's grep for text and unsupported syntax. Use $NAME for one capture and $$$NAME for multiple nodes. Paths accept files, directories, or globs; separate targets with semicolons. Returns 50 matches per page. ${grammarDescription}`,
       promptSnippet: "Prefer structural patterns for supported code exploration and call tracing",
       promptGuidelines: [
         "When ast_grep supports the language and syntax, prefer it for structural questions during explanations, investigations, reviews, and implementation.",
-        "Use ast_grep for calls, constructors, imports, declarations, assignments, and repeated syntax; use read to inspect matched control flow.",
-        "Use ls for immediate directory contents and find for filename/path globs; known paths can go directly to ast_grep or read.",
-        "Prefer grep for text, literals, comments, configuration keys, logs, regex searches, and unsupported AST syntax.",
-        "When dedicated search tools are unavailable or insufficient, use bash with rg; use git grep for committed files outside the checkout.",
-        "Determine AST grammar support from active tool descriptions or bundled metadata; do not guess support from general Tree-sitter knowledge.",
+        "Use ast_grep for calls, constructors, imports, declarations, assignments, and repeated syntax. Use captures to express the intended structure.",
+        "Do not replace ast_grep with text search merely because an identifier can also appear in text matches.",
+        "Use ls for immediate directory contents and find for filename or path globs. Known paths can go directly to ast_grep or read.",
+        "When discovery tools are unavailable or insufficient, run rg --files through an available command-execution tool.",
+        "Prefer Pi's grep for prose, comments, literal strings, configuration keys, log messages, and regular-expression searches.",
+        "When ast_grep is unsupported or remains unreliable, use grep for code search and read to inspect relevant results.",
+        "When grep is unavailable or lacks required options, run rg through an available command-execution tool.",
+        "For committed files outside the checkout, use git grep through an available command-execution tool.",
+        "For rg and git grep, follow active execution restrictions. Do not assume a shell is available.",
+        "Determine ast_grep grammar support from active descriptions or bundled metadata, not assumptions about Tree-sitter support.",
         "Narrow ast_grep paths. For mixed-language directories, use suitable globs or automatic detection; do not force one grammar onto unrelated files.",
-        "When expected ast_grep matches are absent, check path, language, and pattern; try a focused correction before text-search fallback.",
-        "When AST parsing, matching, or execution remains unreliable, use grep, then bash with rg if needed; avoid unchanged failing queries.",
-        "Treat ast_grep matches as syntax evidence, not type-resolved references or complete call graphs; disclose material coverage gaps.",
-        "Choose ast_grep for useful evidence, not call quotas. Uncertain search coverage means zero matches do not prove absence.",
+        "When expected ast_grep matches are absent, check path, language, and pattern. Try a focused correction before text-search fallback.",
+        "Do not repeat unchanged failing ast_grep queries. Choose ast_grep for useful evidence, not tool-call counts or a fixed sequence.",
+        "Treat ast_grep matches as syntax evidence, not type-resolved references or complete call graphs. Disclose material coverage gaps.",
+        "When ast_grep coverage is uncertain, zero matches do not prove absence.",
       ],
       parameters: Type.Object({
         pat: Type.String({ minLength: 1 }),
@@ -159,13 +168,15 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
       description: `Prefer staged structural rewrites when syntax defines the targets and transformation, even for one occurrence. Use hashline edit for context-specific changes. Supply ops [{pat,out}] and paths. No files change during preview. Changed preview sources are rejected before writes. To apply, write a reason to xd://resolve; to discard, write a reason to xd://reject. ${grammarDescription}`,
       promptSnippet: "Preview syntax-defined transformations; use hashline edit for context-specific changes",
       promptGuidelines: [
-        "Prefer ast_edit when syntax accurately defines the intended targets and transformation; match count alone must not determine the tool.",
-        "Before unfamiliar or broad ast_edit rewrites, inspect the pattern with ast_grep; restrict paths and captures to authorized targets.",
-        "Use ast_grep, not ast_edit, for read-only exploration. Identical names need not identify the same symbol.",
-        "Review every ast_edit preview location, replacement, comment, and formatting change; narrow unintended matches before applying.",
+        "When supported syntax accurately defines both targets and transformation, prefer ast_edit, even for one occurrence.",
+        "For ast_edit, select the smallest correct change. Match count alone must not determine the tool.",
+        "Read relevant implementations before staging ast_edit. Before unfamiliar or broad rewrites, inspect the pattern with ast_grep.",
+        "Restrict ast_edit paths and captures to authorized targets. Identical names need not identify the same symbol.",
+        "Use ast_grep, not ast_edit, for read-only exploration.",
+        "Review every ast_edit preview location, replacement, comment, and formatting change. Narrow unintended matches before applying.",
         "When an ast_edit preview becomes stale, inspect current source and stage a new preview before resolving.",
         "Apply or discard a pending ast_edit preview before another editing method changes its affected files.",
-        "After ast_edit or hashline edit, review the resulting diff and run applicable checks; edit application does not prove behavioral correctness.",
+        "After ast_edit resolution, review the resulting diff and run applicable checks. Successful matching does not prove behavioral correctness.",
       ],
       parameters: Type.Object({ ops: Type.Array(Type.Object({ pat: Type.String({ minLength: 1 }), out: Type.String() }), { minItems: 1 }), paths: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }),
       executionMode: "sequential",
@@ -179,12 +190,13 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
     });
     pi.registerTool<typeof builtinWrite.parameters, FileTrackingDetails | undefined>({
       ...builtinWrite,
+      description: `${builtinWrite.description} For reviewed ast_edit previews, write a reason to xd://resolve or xd://reject. Do not bypass edit safeguards.`,
       executionMode: "sequential",
       promptGuidelines: [
         ...(builtinWrite.promptGuidelines ?? []),
-        "When CodeAnchor has an AST preview, write a reason to xd://resolve to apply it or xd://reject to discard it.",
+        "For a reviewed ast_edit preview, use write with a reason at xd://resolve to apply or xd://reject to discard.",
         "Use write for new files or justified complete rewrites, not to bypass failed edit checks or AST/hashline safeguards.",
-        "Do not bypass edit or ast_edit safeguards with shell replacement commands.",
+        "Do not bypass edit or ast_edit safeguards through scripts or command tools.",
       ],
       renderResult(result, options, theme, context) {
         if (context.args.path === "xd://resolve" || context.args.path === "xd://reject") {

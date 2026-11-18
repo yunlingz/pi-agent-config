@@ -89,6 +89,19 @@ try {
     assert(session.getActiveToolNames().includes(name), `Live setup is missing ${name}`);
   }
   session.setActiveToolsByName(["read", "edit", "write", "ast_grep", "ast_edit"]);
+  const nativeGuidelines = [live.sdk.createReadToolDefinition(temporary), live.sdk.createEditToolDefinition(temporary), live.sdk.createWriteToolDefinition(temporary)]
+    .flatMap(tool => tool.promptGuidelines ?? []);
+  const codeAnchorGuidelines = session.getAllTools()
+    .filter(tool => ["read", "edit", "write", "ast_grep", "ast_edit"].includes(tool.name))
+    .flatMap(tool => tool.promptGuidelines ?? []).filter(rule => !nativeGuidelines.includes(rule));
+  assert(codeAnchorGuidelines.length > 0);
+  const assertGuidance = (): void => {
+    const enabled = live.session.getActiveToolNames().includes("ast_grep");
+    for (const guideline of codeAnchorGuidelines) {
+      assert.equal(live.session.systemPrompt.includes(guideline), enabled, "CodeAnchor guidance must follow active definitions");
+    }
+  };
+  assertGuidance();
   session.subscribe(event => {
     observedEventTypes.add(event.type);
     if (event.type !== "message_update") events.push(event);
@@ -121,6 +134,7 @@ try {
       }
       assert.equal(live.session.thinkingLevel, reasoning);
       assert.equal(extensionErrors.length, 0, "Extension error; raw diagnostics withheld");
+      assertGuidance();
       console.log(`PASS: live ${label}`);
     } finally { clearTimeout(timer); }
   };
@@ -138,6 +152,7 @@ try {
   assert(!live.session.getActiveToolNames().includes("ast_edit"));
   await live.session.reload();
   assert(!live.session.getActiveToolNames().includes("ast_grep"));
+  assertGuidance();
   await prompt("built-in tools after off and reload", 'Read fixture.ts, then use the built-in exact-text edit tool to change logger.info("after") to logger.warn("after"). Preserve everything else. Do not use write. Reply briefly.', ["read", "edit"]);
   assert.equal(await readFile(path, "utf8"), source.replace('console.log("before")', 'logger.warn("after")'));
   await live.session.prompt("/code-anchor on");
@@ -162,9 +177,11 @@ try {
     assert(sessionFile);
     assert.equal(live.sdk.SessionManager.open(sessionFile).getBranch().findLast(entry => entry.type === "compaction")?.summary, checkpoint.summary);
     assert.equal(live.session.thinkingLevel, reasoning);
+    assertGuidance();
     console.log("PASS: live manual compaction, canonical file metadata, and persisted summary");
   } finally { clearTimeout(compactionTimeout); }
   await live.session.reload();
+  assertGuidance();
   await prompt("hashline continuation after compaction and reload", "Read fixture.ts, then use hashline edit to change logger.warn to logger.error. Preserve the marker and all other bytes. Reply with exactly the marker identifier, without // or formatting.", ["read", "edit"]);
   assert.equal(live.session.getLastAssistantText()?.trim(), marker);
   assert.equal(await readFile(path, "utf8"), source.replace('console.log("before")', 'logger.error("after")'));

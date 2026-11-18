@@ -22,6 +22,8 @@ let phase = "loading the real Pi extension";
 const heartbeat = setInterval(() => process.stderr.write(`[${new Date().toISOString()}] CodeAnchor integration: ${phase}\n`), 20_000);
 const originalFetch = globalThis.fetch;
 let networkAttempts = 0;
+let expectedGuidelines: string[] = [];
+let excludedGuidelines: string[] = [];
 try {
   globalThis.fetch = async () => { networkAttempts++; throw new Error("CodeAnchor offline verification must not use the network"); };
   const settings = sdk.SettingsManager.inMemory({ extensions: ["-builtin:mcp"], packages: [], defaultTools: ["+grep", "+find", "+ls"], compaction: { enabled: false }, retry: { enabled: false } });
@@ -31,7 +33,10 @@ try {
   runtime.registerProvider("code-anchor-fixture", {
     api: "code-anchor-fixture", apiKey: "unused-local-fixture", baseUrl: "http://127.0.0.1:1",
     models: [{ id: "fixture", name: "Unused local fixture", reasoning: false, input: ["text"], contextWindow: 64000, maxTokens: 1024, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
-    streamSimple(model) {
+    streamSimple(model, context) {
+      const prompt = ai.getCurrentSystemPrompt(context.messages);
+      for (const guideline of expectedGuidelines) assert(prompt.includes(guideline), "Active tool guidance must reach the provider");
+      for (const guideline of excludedGuidelines) assert(!prompt.includes(guideline), "Disabled CodeAnchor guidance must not reach the provider");
       const stream = ai.createAssistantMessageEventStream();
       const call = pendingCall;
       pendingCall = undefined;
@@ -99,13 +104,42 @@ try {
     assert.equal(Number(advertised[1]), grammarNames.length);
     assert.deepEqual(advertised[2]?.split(", "), grammarNames);
   }
-  const codeAnchorGuidelines = session.getAllTools()
-    .filter(tool => ["ast_grep", "ast_edit"].includes(tool.name))
-    .flatMap(tool => tool.promptGuidelines ?? []);
-  assert(codeAnchorGuidelines.length > 0);
-  for (const guideline of codeAnchorGuidelines) {
-    assert(session.systemPrompt.includes(guideline), "Active AST guidance must reach Pi's prompt");
-  }
+  const nativeDefinitions = [sdk.createReadToolDefinition(temporary), sdk.createEditToolDefinition(temporary), sdk.createWriteToolDefinition(temporary)];
+  const nativeGuidelines = nativeDefinitions.flatMap(tool => tool.promptGuidelines ?? []);
+  const codeAnchorTools = session.getAllTools().filter(tool => ["read", "edit", "write", "ast_grep", "ast_edit"].includes(tool.name));
+  assert.equal(codeAnchorTools.length, 5);
+  const codeAnchorGuidelines = codeAnchorTools.flatMap(tool => tool.promptGuidelines ?? []).filter(rule => !nativeGuidelines.includes(rule));
+  const guidance = (name: string): string => {
+    const tool = codeAnchorTools.find(candidate => candidate.name === name);
+    assert(tool);
+    return [tool.description, ...(tool.promptGuidelines ?? [])].join("\n");
+  };
+  assert.match(guidance("read"), /batch independent read calls/iu);
+  assert.match(guidance("read"), /omitted ranges/u);
+  assert.match(guidance("ast_grep"), /Prefer Pi's grep/u);
+  assert.match(guidance("ast_grep"), /rg --files/u);
+  assert.match(guidance("ast_grep"), /available command-execution tool/u);
+  assert.doesNotMatch(guidance("ast_grep"), /use bash|script_inline|script_js/iu);
+  assert.match(guidance("edit"), /stale anchors/u);
+  assert.match(guidance("edit"), /applicable checks/u);
+  assert.match(guidance("ast_edit"), /match count/iu);
+  assert.match(guidance("write"), /xd:\/\/resolve/u);
+  const assertGuidance = (enabled: boolean): void => {
+    expectedGuidelines = enabled ? codeAnchorGuidelines : nativeGuidelines;
+    excludedGuidelines = enabled ? [] : codeAnchorGuidelines;
+    for (const guideline of expectedGuidelines) assert(session?.systemPrompt.includes(guideline), "Active tool guidance must reach Pi's prompt");
+    for (const guideline of excludedGuidelines) assert(!session?.systemPrompt.includes(guideline), "Disabled guidance must leave Pi's prompt");
+    if (!enabled) {
+      for (const native of nativeDefinitions) {
+        const restored = session?.getAllTools().find(tool => tool.name === native.name);
+        assert(restored);
+        assert.equal(restored.description, native.description);
+        assert.deepEqual(restored.promptGuidelines, native.promptGuidelines);
+        assert.deepEqual(restored.parameters, native.parameters);
+      }
+    }
+  };
+  assertGuidance(true);
   assert.match(await execute("ls", { path: "." }), /file\.ts/u);
   assert.match(await execute("find", { pattern: "*.ts", path: "." }), /file\.ts/u);
 
@@ -170,23 +204,23 @@ try {
   for (const name of builtinNames) {
     assert(runner.getActiveTools().includes(name), `Disabling CodeAnchor must retain ${name}`);
   }
-  for (const guideline of codeAnchorGuidelines) {
-    assert(!session.systemPrompt.includes(guideline), "Disabled AST guidance must leave Pi's prompt");
-  }
+  assertGuidance(false);
   await session.reload();
   runner = session.extensionRunner;
   assert.equal(statuses.get(STATUS_KEY), "code-anchor: off");
   assert(!runner.getActiveTools().includes("ast_grep"));
+  assertGuidance(false);
   const ordinary = await execute("read", { path: "file.ts" });
   assert(!ordinary.includes("[file.ts#"));
   await execute("edit", { path: "file.ts", edits: [{ oldText: "logger.info(value);", newText: "logger.warn(value);" }] });
   assert.equal(await readFile(file, "utf8"), "logger.warn(value);\r\n");
   await session.prompt("/code-anchor on");
   assert.equal(statuses.get(STATUS_KEY), "code-anchor: on");
+  assertGuidance(true);
   assert.match(await execute("read", { path: "file.ts" }), /\[file\.ts#[0-9A-F]{4}\]/u);
-  for (const guideline of codeAnchorGuidelines) {
-    assert(session.systemPrompt.includes(guideline), "Re-enabling CodeAnchor must restore AST guidance");
-  }
+  await session.reload();
+  runner = session.extensionRunner;
+  assertGuidance(true);
   phase = "checking ordinary write, grep fallback, and image delegation";
   await execute("write", { path: "fallback.scss", content: "$color: red;\nbody { color: $color; }\n" });
   assert.equal(await readFile(join(temporary, "fallback.scss"), "utf8"), "$color: red;\nbody { color: $color; }\n");
@@ -268,6 +302,7 @@ try {
   assert(preparation.fileOps.edited.has(canonicalFile.replaceAll("\\", "/")) || preparation.fileOps.edited.has(canonicalFile));
   assert(!preparation.fileOps.written.has("xd://resolve"));
   assert(!preparation.fileOps.written.has("xd://reject"));
+  assertGuidance(true);
   assert.deepEqual(errors, []);
   assert.equal(networkAttempts, 0);
   console.log("PASS: automatic discovery, default-on activation, manifest-derived grammar metadata, built-in discovery tools, hot-toggle guidance, hashline/AST operations, footer statuses and compaction metadata; local provider fixtures only; zero network requests");
