@@ -1,24 +1,43 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { join } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { validateDependencies, validateLock } from "./dependencies.ts";
-import { cleanupJob, createJob, executeJob, inspectJob, setRetention, withJobLease } from "./jobs.ts";
+import { cleanupJob, createJob, executeJob, finishInline, inspectJob, releaseJob, setRetention, withJobLease } from "./jobs.ts";
 import { blockedTool, nativeBlockReason } from "./policy.ts";
 import { displayText, runProcess } from "./process.ts";
 import { progressText } from "./progress.ts";
-import { RETENTION_MS, type JobManifest, type Progress } from "./types.ts";
+import type { JobManifest, Progress, RunResult, SourceView } from "./types.ts";
 import { restoredPreference, PREFERENCE_ENTRY } from "./controls.ts";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { executionEnvironment, mergeEnvironment, projectBinDirectories } from "./environment.ts";
 import { nodeShimTarget, nativeInvocation } from "./executables.ts";
+import { CommandLog } from "./commands.ts";
+import { jobDirectory, storageRoot } from "./storage.ts";
+import { backgroundActive, backgroundStatus, forgetBackground, runForeground, startBackground, stopBackground, stopSessionBackground } from "./background.ts";
+
+const previousStorage = process.env.PI_TEMP_SCRIPTS_DIR;
+const testStorage = await mkdtemp(join(tmpdir(), "script-storage-test-"));
+process.env.PI_TEMP_SCRIPTS_DIR = testStorage;
+after(async () => {
+  if (previousStorage === undefined) delete process.env.PI_TEMP_SCRIPTS_DIR;
+  else process.env.PI_TEMP_SCRIPTS_DIR = previousStorage;
+  assert.deepEqual(await readdir(join(testStorage, "jobs")), []);
+  await rm(testStorage, { recursive: true });
+});
 
 async function fixture(action: (job: JobManifest) => Promise<void>): Promise<void> {
   const job = await createJob("unit-session", "Synthetic test job", () => {});
   try { await action(job); }
-  finally { await rm(job.root, { recursive: true, force: true, maxRetries: 3 }); assert(!existsSync(job.root)); }
+  finally {
+    await stopSessionBackground(job.sessionId);
+    assert(!existsSync(join(job.root, "lease")), "Unresolved test lease retained");
+    await rm(job.root, { recursive: true, force: true, maxRetries: 3 });
+    assert(!existsSync(job.root));
+  }
 }
 
 test("agent shell tools are blocked regardless of command or shell edition", () => {
@@ -47,15 +66,13 @@ test("dependency declarations require exact versions and approved resolved feeds
 
 test("jobs retain files until release, protect pins and leases, and verify exact cleanup", async () => {
   await fixture(async job => {
-    await assert.rejects(cleanupJob(job, job.sessionId, true), /Release/u);
+    await assert.rejects(cleanupJob(job, job.sessionId), /Release/u);
     await setRetention(job, job.sessionId, "pinned");
-    await assert.rejects(cleanupJob(job, job.sessionId, true), /Release/u);
+    await assert.rejects(cleanupJob(job, job.sessionId), /Release/u);
     await withJobLease(job, job.sessionId, async () => {
       await assert.rejects(setRetention(job, job.sessionId, "released"), /lease/u);
     });
-    const released = await setRetention(job, job.sessionId, "released");
-    assert.equal(await cleanupJob(job, job.sessionId), false);
-    assert.equal(await cleanupJob(job, job.sessionId, false, (released.releasedAt ?? 0) + RETENTION_MS), true);
+    assert.equal(await releaseJob(job, job.sessionId), true);
     assert(!existsSync(job.root));
   });
 });
@@ -206,7 +223,7 @@ test("cleanup removes internal links without deleting their external targets", a
     await fixture(async job => {
       await symlink(outside, join(job.root, "external"), process.platform === "win32" ? "junction" : "dir");
       await setRetention(job, job.sessionId, "released");
-      assert(await cleanupJob(job, job.sessionId, true));
+      assert(await cleanupJob(job, job.sessionId));
       assert.equal(await readFile(join(outside, "keep"), "utf8"), "deliverable");
     });
   } finally { await rm(outside, { recursive: true, force: true }); }
@@ -328,5 +345,213 @@ test("managed lifecycle supports Git mutations, package scripts, parallel comman
     assert.equal(result.status,"succeeded",result.output);
     assert.match(result.output,/pass 1/u);
     assert.match(result.output,/Fixture/u);
+  });
+});
+
+test("successful disposable inline evidence is removed while its captured result remains readable", async () => {
+  await fixture(async job => {
+    const code = 'const {exec}=await import(process.env.PI_SCRIPT_RUNTIME); await exec("git",["--version"],{timeoutSeconds:2});';
+    await writeFile(join(job.root, "work", "main.mjs"), code);
+    const output = await executeJob(job, job.sessionId, "main.mjs", [], {purpose:"one time",cwd:job.root,timeoutSeconds:4,inline:code});
+    assert.equal(output.status,"succeeded",output.output);
+    assert.equal(output.commands.length,1);
+    assert.equal(output.commands[0]?.status,"succeeded");
+    assert.equal((await finishInline(job,job.sessionId,output)).state,"removed");
+    assert(!existsSync(job.root));
+    assert.match(output.output,/git version/u);
+  });
+});
+
+test("inline retention preserves explicit keeps, artifacts, output truncation, failures and uncertain termination", async () => {
+  const cases = [
+    {name:"keep",code:'console.log("keep");',keep:true,change:(value:RunResult)=>value},
+    {name:"artifact",code:'const {writeFile}=await import("node:fs/promises"); await writeFile(process.env.PI_SCRIPT_ARTIFACTS+"/deliverable.txt","keep");',change:(value:RunResult)=>value},
+    {name:"truncated",code:'console.log("x".repeat(50000));',change:(value:RunResult)=>value},
+    {name:"failed",code:'process.exitCode=2;',change:(value:RunResult)=>value},
+    {name:"uncertain",code:'console.log("uncertain");',change:(value:RunResult)=>({...value,terminationConfirmed:false})},
+    {name:"partial commands",code:'console.log("partial");',change:(value:RunResult)=>({...value,commandsTruncated:true})},
+  ];
+  for(const entry of cases) await fixture(async job=>{
+    await writeFile(join(job.root,"work","main.mjs"),entry.code);
+    const output=await executeJob(job,job.sessionId,"main.mjs",[],{purpose:entry.name,cwd:job.root,timeoutSeconds:4,inline:entry.code});
+    assert.equal((await finishInline(job,job.sessionId,entry.change(output),entry.keep)).state,"retained",entry.name);
+    assert(existsSync(output.stdoutPath),entry.name);
+  });
+});
+
+test("cleanup inspection failures retain files and report cleanup_failed",async()=>{
+  await fixture(async job=>{
+    const code='console.log("ready");';
+    await writeFile(join(job.root,"work","main.mjs"),code);
+    const output=await executeJob(job,job.sessionId,"main.mjs",[],{purpose:"cleanup failure",cwd:job.root,timeoutSeconds:3,inline:code});
+    await rm(output.artifacts,{recursive:true});
+    assert.equal((await finishInline(job,job.sessionId,output)).state,"cleanup_failed");
+    assert(existsSync(job.root));
+  });
+});
+
+test("workspace source views use the exact executed snapshot and never clean up successful development runs",async()=>{
+  await fixture(async job=>{
+    const code='console.log("executed snapshot");';
+    const entry=join(job.root,"work","main.mjs");
+    await writeFile(entry,code);
+    let source:SourceView|undefined;
+    const output=await executeJob(job,job.sessionId,"main.mjs",[],{purpose:"source view",cwd:job.root,timeoutSeconds:3,onSource:value=>{source=value;}});
+    await writeFile(entry,'console.log("later edit");');
+    assert.equal(source?.text,code);
+    assert.equal(source?.path,join(output.run,"source","main.mjs"));
+    assert(existsSync(entry));
+    assert.equal((await inspectJob(job,job.sessionId)).state,"open");
+  });
+});
+
+test("command events expose actual starts and exits, use stable identities, and bound persisted evidence",async()=>{
+  const log=new CommandLog();
+  log.append({id:"one",command:"git",args:["--version"],cwd:"/project",status:"running"});
+  log.append({id:"one",command:"git",args:["--version"],cwd:"/project",status:"succeeded",exitCode:0});
+  assert.equal(log.snapshot().length,1);
+  assert.equal(log.snapshot()[0]?.status,"succeeded");
+  log.append({id:"invalid",command:"ignored",args:[3],cwd:"/project",status:"running"});
+  assert(log.truncated);
+  for(let index=0;index<100;index++) log.append({id:String(index),command:"tool",args:[],cwd:"/project",status:"running"});
+  assert(log.snapshot().length<=64);
+  await fixture(async job=>{
+    const code='const {exec}=await import(process.env.PI_SCRIPT_RUNTIME); await exec("git",["--version"],{timeoutSeconds:2});';
+    await writeFile(join(job.root,"work","main.mjs"),code);
+    const updates:Progress[]=[];
+    const output=await executeJob(job,job.sessionId,"main.mjs",[],{purpose:"command events",cwd:job.root,timeoutSeconds:4,onProgress:value=>updates.push(value)});
+    assert(updates.some(value=>value.commands?.some(command=>command.status==="running")));
+    assert.equal(output.commands[0]?.status,"succeeded");
+    assert.deepEqual(output.commands[0]?.args,["--version"]);
+  });
+});
+
+test("private stable storage rejects substituted roots and preserves registered legacy jobs",async()=>{
+  const jobs=await jobDirectory(true);
+  assert.equal(jobs,join(storageRoot(),"jobs"));
+  if(process.platform!=="win32") assert.equal((await lstat(testStorage)).mode & 0o777,0o700);
+  await fixture(async job=>{
+    assert.equal((await lstat(job.root)).mode & 0o077,0);
+    const alias=`${testStorage}-link`;
+    try{
+      await symlink(testStorage,alias,process.platform==="win32"?"junction":"dir");
+      process.env.PI_TEMP_SCRIPTS_DIR=alias;
+      await assert.rejects(inspectJob(job,job.sessionId),/original directory/u);
+    } finally {process.env.PI_TEMP_SCRIPTS_DIR=testStorage;await rm(alias,{force:true});}
+  });
+  const root=await mkdtemp(join(tmpdir(),"pi-managed-script-"));
+  const legacy:JobManifest={format:1,id:"legacy-fixture",root,token:"owned-fixture",sessionId:"legacy-session",purpose:"No automatic migration",createdAt:0,state:"released",dependencies:{}};
+  try{
+    await writeFile(join(root,"manifest.json"),JSON.stringify(legacy));
+    assert.equal((await inspectJob(legacy,legacy.sessionId)).root,root);
+    await jobDirectory(true);
+    assert(existsSync(root));
+    assert(await cleanupJob(legacy,legacy.sessionId));
+  }finally{await rm(root,{force:true,recursive:true});}
+});
+
+test("background start returns before completion, retains its lease, ignores later abort and stops explicitly",async()=>{
+  await fixture(async job=>{
+    const code='console.log(process.pid); setInterval(()=>console.log("tick"),100);';
+    await writeFile(join(job.root,"work","main.mjs"),code);
+    const controller=new AbortController();
+    const start=Date.now();
+    const running=await startBackground(job,job.sessionId,"main.mjs",[],"inline",{purpose:"service",cwd:job.root,timeoutSeconds:2,inline:code,signal:controller.signal},{startupSeconds:2,service:true});
+    assert(Date.now()-start<2000);
+    assert.equal(running.status,"running");
+    assert(backgroundActive(job.sessionId));
+    assert(existsSync(join(job.root,"lease")));
+    controller.abort();
+    await new Promise(accept=>setTimeout(accept,150));
+    assert.equal((await backgroundStatus(job,job.sessionId))?.status,"running");
+    await assert.rejects(releaseJob(job,job.sessionId),/lease/u);
+    const stopped=await stopBackground(job,job.sessionId);
+    assert.equal(stopped.status,"cancelled");
+    assert(stopped.record?.terminationConfirmed);
+    assert(!existsSync(join(job.root,"lease")));
+    forgetBackground(job.id);
+  });
+});
+
+test("foreground interruption stops waiting, preserves process ownership and allows explicit stop",async()=>{
+  await fixture(async job=>{
+    const code='console.log("FOREGROUND_ALIVE");setInterval(()=>{},1000);';
+    await writeFile(join(job.root,"work","main.mjs"),code);
+    const controller=new AbortController();
+    let updates = 0;
+    let sources = 0;
+    const started=Promise.withResolvers<void>();
+    const waiting=runForeground(job,job.sessionId,"main.mjs",[],"workspace",{purpose:"foreground",cwd:job.root,timeoutSeconds:5,signal:controller.signal,onProgress:()=>{updates++;started.resolve();},onSource:()=>{sources++;}});
+    await started.promise;
+    controller.abort();
+    const detached=await waiting;
+    assert(detached.background);
+    const callbacksAtHandoff = { updates, sources };
+    await new Promise(accept=>setTimeout(accept,150));
+    assert.deepEqual({ updates, sources }, callbacksAtHandoff, "Old tool callbacks must detach after foreground handoff");
+    assert(backgroundActive(job.sessionId));
+    const stopped=await stopBackground(job,job.sessionId);
+    assert.equal(stopped.status,"cancelled");
+    forgetBackground(job.id);
+  });
+});
+
+test("background startup validation and finite deadlines preserve failure records without orphan processes",async()=>{
+  await fixture(async job=>{
+    const code='setInterval(()=>{},1000);';
+    await writeFile(join(job.root,"work","main.mjs"),code);
+    const options={purpose:"validation",cwd:job.root,timeoutSeconds:1};
+    await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1}),/requires runtimeSeconds/u);
+    await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1,service:true,runtimeSeconds:2}),/requires runtimeSeconds/u);
+    await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1,service:true,readyUrl:"https://example.com"}),/loopback/u);
+    await startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1,runtimeSeconds:0.3});
+    await new Promise(accept=>setTimeout(accept,500));
+    const completed=await backgroundStatus(job,job.sessionId);
+    assert.equal(completed?.status,"timed_out");
+    assert(completed?.record?.terminationConfirmed);
+    forgetBackground(job.id);
+  });
+});
+
+test("loopback readiness is checked and failed startup stops the actual process",async()=>{
+  const reservation=createServer();
+  await new Promise<void>(accept=>reservation.listen(0,"127.0.0.1",accept));
+  const address=reservation.address();
+  assert(address && typeof address!=="string");
+  const port=address.port;
+  await new Promise<void>((accept,reject)=>reservation.close(error=>error?reject(error):accept()));
+  await fixture(async job=>{
+    const code=`import http from "node:http";http.createServer((request,response)=>{response.statusCode=request.url==="/not-ready"?503:200;response.end("fixture");}).listen(${port},"127.0.0.1");`;
+    await writeFile(join(job.root,"work","main.mjs"),code);
+    const details=await startBackground(job,job.sessionId,"main.mjs",[],"workspace",{purpose:"readiness",cwd:job.root,timeoutSeconds:2},{startupSeconds:2,service:true,readyUrl:`http://127.0.0.1:${port}/`});
+    assert.equal(details.background?.readiness,"ready");
+    await stopBackground(job,job.sessionId);
+    forgetBackground(job.id);
+    await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",{purpose:"failed readiness",cwd:job.root,timeoutSeconds:1},{startupSeconds:0.2,service:true,readyUrl:`http://127.0.0.1:${port}/not-ready`}),/startup failed/u);
+    assert(!backgroundActive(job.sessionId));
+    assert(!existsSync(join(job.root,"lease")));
+    forgetBackground(job.id);
+  });
+});
+
+test("background exec accepts omitted options while foreground exec still requires a child deadline", async () => {
+  await fixture(async job => {
+    const child = 'console.log("DEFAULT_OPTIONS_CHILD");setInterval(()=>{},1000);';
+    const code = `const {exec}=await import(process.env.PI_SCRIPT_RUNTIME);await exec(process.execPath,["-e",${JSON.stringify(child)}]);`;
+    await writeFile(join(job.root, "work", "main.mjs"), code);
+    await startBackground(job, job.sessionId, "main.mjs", [], "workspace", { purpose: "Default child options", cwd: job.root, timeoutSeconds: 2 }, { startupSeconds: 2, service: true });
+    const deadline = Date.now() + 2000;
+    while (!(await backgroundStatus(job, job.sessionId))?.output.includes("DEFAULT_OPTIONS_CHILD")) {
+      assert(Date.now() < deadline, "The actual child command did not start");
+      await new Promise(accept => setTimeout(accept, 20));
+    }
+    const stopped = await stopBackground(job, job.sessionId);
+    assert.equal(stopped.status, "cancelled");
+    assert(stopped.record?.terminationConfirmed);
+    forgetBackground(job.id);
+    const foreground = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: "Required foreground deadline", cwd: job.root, timeoutSeconds: 2 });
+    assert.equal(foreground.status, "failed");
+    assert.match(foreground.output, /explicit positive deadline/u);
+    assert(!foreground.output.includes("TypeError"));
   });
 });

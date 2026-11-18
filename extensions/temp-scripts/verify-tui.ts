@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import type { IPty } from "node-pty";
 import type { TerminalTrace } from "./tui-fixture.ts";
+import type { RunResult } from "./types.ts";
 
 const [installation, ptyDirectory, footerDirectory] = process.argv.slice(2);
 assert(installation && ptyDirectory && footerDirectory, "Usage: node verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>");
@@ -26,6 +27,17 @@ const traces = async (): Promise<TerminalTrace[]> => {
   const text = await readFile(tracePath, "utf8").catch(() => "");
   return text.split("\n").slice(0, -1).map(line => JSON.parse(line) as TerminalTrace);
 };
+const assertServiceStopped = async (root: string) => {
+  assert(!existsSync(join(root, "lease")), "Session transition must release the stopped service lease");
+  const runs = await readdir(join(root, "runs"));
+  assert.equal(runs.length, 1);
+  const result = JSON.parse(await readFile(join(root, "runs", runs[0], "result.json"), "utf8")) as RunResult;
+  assert.equal(result.status, "cancelled");
+  assert(result.terminationConfirmed);
+  const pid = /^PANEL_LIVE (\d+)$/mu.exec(result.output)?.[1];
+  assert(pid, "Service output must identify the actual process");
+  assert.throws(() => process.kill(Number(pid), 0), /ESRCH/u);
+};
 try {
   await mkdir(join(agent, "extensions"), { recursive: true });
   const root = dirname(fileURLToPath(import.meta.url));
@@ -34,7 +46,7 @@ try {
   await writeFile(join(agent, "settings.json"), JSON.stringify({ packages: [], extensions: ["-builtin:mcp"], defaultProvider: "scripts-terminal-fixture", defaultModel: "fixture", quietStartup: true, retry: { enabled: false }, compaction: { enabled: false }, cacheWarming: "off", powerline: { welcome: false, autoFollowUp: false, git: { polling: "off" }, customItems: [{ id: "temp_scripts", statusKey: "temp-scripts", position: "left", color: "muted" }], layout: { left: ["custom:temp_scripts", "path"], right: [] } } }));
   const info = JSON.parse(await readFile(join(installation, "package.json"), "utf8")) as { bin: { pi: string } };
   terminal = pty.spawn(process.execPath, [resolve(installation, info.bin.pi), "--offline", "--no-approve", "--no-mcp", "--no-session", "--no-skills", "--no-context-files", "--no-themes", "--no-prompt-templates", "--extension", resolve(footerDirectory), "--extension", join(root, "tui-fixture.ts"), "--tui-mode", "fullscreen"], {
-    cols: 120, rows: 36, cwd: workspace, name: "xterm-256color", env: { ...process.env, PI_CODING_AGENT_DIR: agent, TEMP_SCRIPTS_TUI_DIRECTORY: workspace, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PI_PROGRAM_STATUS: "0", TERM: "xterm-256color", COLORTERM: "truecolor" },
+    cols: 120, rows: 36, cwd: workspace, name: "xterm-256color", env: { ...process.env, PI_TEMP_SCRIPTS_DIR:join(temporary,"script-storage"), PI_CODING_AGENT_DIR: agent, TEMP_SCRIPTS_TUI_DIRECTORY: workspace, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PI_PROGRAM_STATUS: "0", TERM: "xterm-256color", COLORTERM: "truecolor" },
   });
   const child = terminal;
   exited = new Promise<void>(accept => child.onExit(value => { exit = value; accept(); }));
@@ -62,15 +74,31 @@ try {
   await wait("default-on Powerline status", () => /scripts:\s*on/u.test(visible()));
   child.write("Run the terminal fixture.\r");
   await wait("showing stdout before completion", () => visible().includes("TUI_EARLY"));
+  assert(visible().includes("Inline JS"));
+  assert(visible().includes("INLINE_SOURCE_VISIBLE"));
+  assert(visible().includes("Commands ("));
   assert(!(await traces()).some(value => value.event === "settled"));
   await wait("updating elapsed time while running", () => /elapsed 1\.\ds/u.test(visible()));
   await wait("showing stderr and final output", () => visible().includes("TUI_STDERR") && visible().includes("TUI_LATE"));
   await wait("settled terminal run", async () => (await traces()).some(value => value.event === "settled"));
+  assert((await traces()).filter(value=>value.event==="job").every(value=>value.root && !existsSync(value.root)));
+  child.resize(120,180); // Source and command details must fit when checking expansion, not be offscreen.
+  await wait("showing successful inline cleanup",()=>visible().includes("temporary files removed"));
   child.write("\x0f");
   assert.equal((await checkpoint())?.expanded, true);
+  await wait("inspecting inline source after disk cleanup",()=>visible().includes("INLINE_SOURCE_END"));
   child.resize(60, 24);
   await checkpoint();
-  child.resize(120, 36);
+  child.resize(120,180);
+  child.write("\x0f");
+  assert.equal((await checkpoint())?.expanded,false);
+  const settledCount=(await traces()).filter(value=>value.event==="settled").length;
+  child.write("Run the workspace fixture.\r");
+  await wait("workspace and job mode headers",async()=> (await traces()).filter(value=>value.event==="settled").length>settledCount);
+  assert(visible().includes("Workspace JS"));
+  assert(visible().includes("Script job"));
+  assert(visible().includes("WORKSPACE_SOURCE_VISIBLE"));
+  assert((await traces()).filter(value=>value.event==="job").every(value=>value.root && !existsSync(value.root)));
   output = "";
   child.write("/temp-scripts off\r");
   assert(!(await checkpoint())?.tools?.includes("script_inline"));
@@ -82,14 +110,50 @@ try {
   child.write("/temp-scripts on\r");
   assert((await checkpoint())?.tools?.includes("script_inline"));
   await wait("restoring on Powerline status", () => /scripts:\s*on/u.test(visible()));
+  child.resize(100,40);
+  const beforeService=(await traces()).filter(value=>value.event==="settled").length;
+  child.write("Run the background fixture.\r");
+  await wait("nonblocking background startup",async()=> (await traces()).filter(value=>value.event==="settled").length>beforeService);
+  await wait("fixed background panel",()=>visible().includes("Background jobs")&&visible().includes("Fixed panel service")&&visible().includes("PANEL_LIVE"));
+  const snapshotsBefore=(await traces()).filter(value=>value.event==="settled").length;
+  output="";
+  child.write("An unrelated query.\r");
+  await wait("new user query while background work runs",async()=> (await traces()).filter(value=>value.event==="settled").length>snapshotsBefore);
+  child.resize(99,40); // Force a full redraw; incremental terminal output need not repeat an unchanged panel heading.
+  await wait("background panel stays near editor",()=>visible().includes("Background jobs"));
+  child.write("/script-jobs expand\r");
+  await checkpoint();
+  const starts=(await traces()).filter(value=>value.event==="start").length;
+  child.write("/reload\r");
+  await wait("background controller restored after reload",async()=> (await traces()).filter(value=>value.event==="start").length>starts);
+  await wait("fixed panel redraw after reload",()=>visible().includes("Background jobs"));
+  const stopCount=(await traces()).filter(value=>value.event==="settled").length;
+  child.write("Please stop service.\r");
+  await wait("stopping service and releasing job",async()=> (await traces()).filter(value=>value.event==="settled").length>stopCount);
+  assert((await traces()).filter(value=>value.event==="job").every(value=>value.root&&!existsSync(value.root)));
+  const startService = async () => {
+    const settled = (await traces()).filter(value => value.event === "settled").length;
+    child.write("Run the background fixture.\r");
+    await wait("starting service for a native session transition", async () => (await traces()).filter(value => value.event === "settled").length > settled);
+    const root = (await traces()).findLast(value => value.event === "job")?.root;
+    assert(root && existsSync(root));
+    return root;
+  };
+  const replacedRoot = await startService();
+  const beforeNew = (await traces()).filter(value => value.event === "start").length;
+  child.write("/new\r");
+  await wait("native session replacement stops active service", async () => (await traces()).filter(value => value.event === "start").length > beforeNew);
+  await assertServiceStopped(replacedRoot);
+  const quitRoot = await startService();
   child.write("/quit\r");
   phase = "waiting for graceful terminal shutdown";
   let quitTimer: ReturnType<typeof setTimeout> | undefined;
   try { await Promise.race([exited, new Promise<void>((_accept, reject) => { quitTimer = setTimeout(() => reject(new Error("Terminal shutdown timed out")), 10000); })]); }
   finally { clearTimeout(quitTimer); }
   assert.equal(exit?.exitCode, 0);
+  await assertServiceStopped(quitRoot);
   assert(!(await traces()).some(value => value.event === "network" || value.error));
-  console.log("PASS: actual Pi TUI; stdout/stderr before completion; elapsed clock; narrow resize; expansion; Powerline on/off; reload; re-enable; graceful shutdown; zero network");
+  console.log("PASS: actual Pi TUI; inline/workspace/job headers; source after cleanup; commands; streaming; elapsed clock; resize/expansion; Powerline; fixed panel/reload; stop/release; native new-session and quit stop active services; zero network");
 } finally {
   clearInterval(heartbeat);
   if (terminal && !exit) { terminal.kill(); if (exited) await exited; }

@@ -11,7 +11,7 @@ import { resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { testTUI, testUI } from "../../scripts/test-fixtures.ts";
 import { STATUS_KEY } from "./controls.ts";
 import { stripVTControlCharacters } from "node:util";
-import { ENTRY_TYPE, type JobReference } from "./types.ts";
+import { ENTRY_TYPE, type JobReference, type ExecutionDetails } from "./types.ts";
 
 const installation = resolve(process.argv[2] ?? "");
 assert(process.argv[2], "Usage: node verify-integration.ts <installed-pi-package-directory>");
@@ -19,13 +19,15 @@ const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathT
 const { Type }: typeof import("typebox") = await import(pathToFileURL(createRequire(join(installation, "package.json")).resolve("typebox")).href);
 const ai: typeof import("@earendil-works/pi-ai") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-ai", installation)).href);
 const temporary = await mkdtemp(join(tmpdir(), "temp-scripts-integration-"));
+const previousStorage = process.env.PI_TEMP_SCRIPTS_DIR;
+process.env.PI_TEMP_SCRIPTS_DIR = join(temporary,"script-storage");
 let session: AgentSession | undefined;
 const owned = new Set<string>();
 const originalFetch = globalThis.fetch;
 let networkAttempts = 0;
 try {
   globalThis.fetch = async () => { networkAttempts++; throw new Error("Offline integration cannot access the network"); };
-  const settings = sdk.SettingsManager.inMemory({ extensions: ["-builtin:mcp"], packages: [], retry: { enabled: false }, compaction: { enabled: false } });
+  const settings = sdk.SettingsManager.inMemory({ extensions: ["-builtin:mcp"], packages: [], defaultTools:["+grep","+find","+ls"], retry: { enabled: false }, compaction: { enabled: false } });
   const runtime = await sdk.ModelRuntime.create({ authPath: join(temporary, "auth.json"), modelsPath: null, modelsStorePath: join(temporary, "models-store.json"), allowModelNetwork: false, refreshOnCreate: false });
   let pending: ToolCall | undefined;
   let count = 0;
@@ -82,10 +84,22 @@ try {
     assert.equal(outcome.isError, error, text);
     return text;
   };
+  const executionDetails = (): ExecutionDetails => {
+    const message = session?.messages.findLast(value => value.role === "toolResult" && ["script_inline", "script_js"].includes(value.toolName));
+    assert(message?.role === "toolResult");
+    const details: unknown = message.details; // Persisted custom result: the extension owns this serialization contract.
+    return details as ExecutionDetails;
+  };
   assert(session.getActiveToolNames().includes("bash"));
   for (const name of ["script_inline", "script_js", "script_job"]) assert(session.getActiveToolNames().includes(name));
   assert(!session.getAllTools().some(tool => tool.name === "script_ts" || tool.name === "script_write"));
   assert(session.systemPrompt.includes("every new temporary helper"));
+  const assertFileTools=()=>{ for(const name of ["ls","find","grep","read","edit","write"]) assert(session?.getActiveToolNames().includes(name),`Missing dedicated tool ${name}`); };
+  assertFileTools();
+  await writeFile(join(temporary,"search-fixture.txt"),"NATIVE_SEARCH_MARKER\n");
+  assert.match(await execute("ls",{path:temporary}),/search-fixture/u);
+  assert.match(await execute("find",{path:temporary,pattern:"search-fixture.txt"}),/search-fixture/u);
+  assert.match(await execute("grep",{path:join(temporary,"search-fixture.txt"),pattern:"NATIVE_SEARCH_MARKER"}),/NATIVE_SEARCH_MARKER/u);
   const created = await execute("script_job", { action: "create", purpose: "Author through normal tools" });
   const id = /^Job: (.+)$/mu.exec(created)?.[1];
   const work = /^Source directory: (.+)$/mu.exec(created)?.[1];
@@ -110,6 +124,18 @@ try {
   await execute("bash", { command: "git --version", timeout: 5 }, true);
   assert.match(await execute("nested_shell_fixture", {}), /Nested Bash blocked/u);
   assert.match(await execute("script_inline", { purpose: "Managed Git command", code: 'const {exec}=await import(process.env.PI_SCRIPT_RUNTIME); const child=await exec("git",["--version"],{timeoutSeconds:3}); if(child.status!=="succeeded") throw new Error(child.output); console.log(child.output);', timeoutSeconds: 5 }), /git version/u);
+  const disposable = executionDetails();
+  assert.equal(disposable.mode, "inline");
+  assert.equal(disposable.retention?.state, "removed");
+  assert(disposable.source?.text.includes('exec("git"'));
+  assert(disposable.record);
+  assert(!existsSync(dirname(dirname(disposable.record.run))));
+  assert(disposable.commands.some(command => command.args[0] === "--version" && command.status === "succeeded"));
+  await execute("script_inline", { purpose:"Retained inline fixture", code:'console.log("KEEP_INLINE");', keep:true, timeoutSeconds:5 });
+  const retained = executionDetails();
+  assert.equal(retained.retention?.state,"retained");
+  assert(retained.record);
+  assert(existsSync(retained.record.stdoutPath));
   const projectScript = join(temporary, "existing.mjs");
   await writeFile(projectScript, 'console.log("established workflow");\n');
   await execute("read", { path: projectScript });
@@ -134,29 +160,32 @@ try {
   assert.equal(statuses.get(STATUS_KEY), "scripts: off");
   assert(!session.getActiveToolNames().includes("script_inline"));
   assert(!session.systemPrompt.includes("every new temporary helper"));
+  assertFileTools();
   assert(existsSync(path));
   await session.reload();
   assert(!session.getActiveToolNames().includes("script_inline"));
+  assertFileTools();
   session.setActiveToolsByName([...session.getActiveToolNames(), "bash"]);
   assert.match(await execute("bash", { command: "git --version", timeout: 5 }), /git version/u);
   await session.prompt("/temp-scripts on");
   assert.equal(statuses.get(STATUS_KEY), "scripts: on");
   assert(session.getActiveToolNames().includes("script_inline"));
   assert(session.systemPrompt.includes("every new temporary helper"));
+  assertFileTools();
   await execute("bash", { command: "git --version", timeout: 5 }, true);
   const manual = await session.executeBash("git --version");
   assert.match(manual.output, /git version/u);
   const started = Promise.withResolvers<void>();
   const stopWatching = session.subscribe(event => {
-    if (event.type === "tool_execution_update" && event.toolName === "script_inline") started.resolve();
+    if (event.type === "tool_execution_update" && event.toolName === "script_inline" && (event.partialResult as {details?:ExecutionDetails}).details?.status === "running") started.resolve();
   });
-  const activeRun = execute("script_inline", {purpose:"Shutdown fixture", code:"setInterval(() => {}, 1000);", timeoutSeconds:10}, true);
+  const activeRun = execute("script_inline", {purpose:"Shutdown fixture", code:"setInterval(() => {}, 1000);", timeoutSeconds:10});
   try {
     await started.promise;
     await session.prompt("/temp-scripts off");
     assert(notifications.some(text => text.includes("Wait for active work")));
     assert(session.getActiveToolNames().includes("script_inline"));
-    await session.extensionRunner.emit({type:"session_shutdown",reason:"reload"});
+    await session.extensionRunner.emit({type:"session_shutdown",reason:"quit"});
     await activeRun;
   } finally { stopWatching(); }
   await session.reload();
@@ -166,32 +195,54 @@ try {
   sdk.initTheme("dark", false);
   const definition = session.getToolDefinition("script_inline");
   assert(definition);
-  const component = new sdk.ToolExecutionComponent("script_inline", "render-check", {purpose:"Streaming check", timeoutSeconds:5}, {}, definition, testTUI(new tui.Container()), temporary);
+  const args = {purpose:"Streaming check", timeoutSeconds:5, code:'console.log("VISIBLE_INLINE_SOURCE");'};
+  const component = new sdk.ToolExecutionComponent("script_inline", "render-check", args, {}, definition, testTUI(new tui.Container()), temporary);
   component.setArgsComplete();
-  const streamed = `Streaming check\nrunning · elapsed 4.0s\n${Array.from({length:40}, (_, index) => `row-${index} ${"界".repeat(10)}`).join("\n")}\nLATEST_OUTPUT`;
-  component.updateResult({ content:[{type:"text",text:streamed}], details:undefined, isError:false }, true);
+  const details:ExecutionDetails = {kind:"script-execution",mode:"inline",cwd:temporary,status:"running",elapsedMs:4000,commands:retained.commands,commandsTruncated:false,output:`${Array.from({length:40}, (_, index) => `row-${index} ${"界".repeat(10)}`).join("\n")}\nLATEST_OUTPUT`,progress:"running · elapsed 4.0s"};
+  component.updateResult({ content:[{type:"text",text:details.output}], details, isError:false }, true);
   for (const width of [120,60,24]) {
     component.setExpanded(false);
     const collapsed = component.render(width).map(stripVTControlCharacters);
     assert(collapsed.join("\n").includes("LATEST_OUTPUT"));
-    assert(collapsed.length <= 20);
+    assert(collapsed.join("\n").includes("Inline JS"));
+    assert(collapsed.join("").replace(/\s/gu, "").includes("VISIBLE_INLINE_SOURCE"));
+    assert(collapsed.length <= 35);
     assert(collapsed.every(line => tui.visibleWidth(line) <= width));
     component.setExpanded(true);
     assert(component.render(width).map(stripVTControlCharacters).join("\n").includes("row-0"));
   }
+  const workspaceDefinition = session.getToolDefinition("script_js");
+  assert(workspaceDefinition);
+  const workspaceComponent = new sdk.ToolExecutionComponent("script_js","workspace-render",{purpose:"Workspace check",entry:"main.mjs",args:["arg"],cwd:temporary,timeoutSeconds:5},{},workspaceDefinition,testTUI(new tui.Container()),temporary);
+  workspaceComponent.setArgsComplete();
+  workspaceComponent.updateResult({content:[{type:"text",text:"LATEST_OUTPUT"}],details:{...details,mode:"workspace",source:{text:'console.log("EXECUTED_SNAPSHOT");',truncated:false}},isError:false},false);
+  const workspaceText = workspaceComponent.render(120).map(stripVTControlCharacters).join("\n");
+  assert(workspaceText.includes("Workspace JS"));
+  assert(workspaceText.includes("EXECUTED_SNAPSHOT"));
+  assert(workspaceText.includes("main.mjs"));
   console.log("PASS: live-tail rendering at three widths, toggle/status, disabled gate restoration, retained files, and reload preference");
-  await execute("script_job", { action: "release", job: id });
-  await execute("script_js", { job: id, entry: "main.mjs", purpose: "Released job", timeoutSeconds: 5 }, true);
-  await execute("script_job", { action: "cleanup", job: id, immediate: true });
+  await execute("script_job", { action:"pin",jobs:[id,retained.record.job] });
+  assert(existsSync(path));
+  await execute("script_job", { action:"release",jobs:[id,retained.record.job] });
   assert(!existsSync(dirname(work)));
+  assert(!existsSync(retained.record.stdoutPath));
+  await session.reload();
+  const listed = await execute("script_job", {action:"list"});
+  assert(!listed.includes(id));
+  assert(!listed.includes(retained.record.job));
   assert.deepEqual(errors, []);
   assert.equal(networkAttempts, 0);
   console.log("PASS: discovery; three JS-only tools; native/CodeAnchor authoring; stale edits; AST application; blanket and nested shell gates; managed Git/project Node execution; Bash-disabled execution; reload; release/cleanup; zero external model/network requests");
 } finally {
   globalThis.fetch = originalFetch;
+  if (previousStorage === undefined) delete process.env.PI_TEMP_SCRIPTS_DIR;
+  else process.env.PI_TEMP_SCRIPTS_DIR = previousStorage;
   try { if (session) { await session.abort(); await session.waitForIdle(); await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); } }
   finally {
-    for (const root of owned) await rm(root, { recursive: true, force: true, maxRetries: 3 });
+    for (const root of owned) {
+      assert(!existsSync(join(root,"lease")),"Unresolved integration job retained");
+      await rm(root, { recursive: true, force: true, maxRetries: 3 });
+    }
     await rm(temporary, { recursive: true, force: true, maxRetries: 3 });
     assert(!existsSync(temporary));
     for (const root of owned) assert(!existsSync(root));

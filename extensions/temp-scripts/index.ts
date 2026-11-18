@@ -2,24 +2,32 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { installDependencies } from "./dependencies.ts";
-import { cleanupJob, createJob, executeJob, inspectJob, jobReference, saveManifest, setRetention, withJobLease } from "./jobs.ts";
+import { cleanupJob, createJob, executeJob, finishInline, inspectJob, jobReference, releaseJob, saveManifest, setRetention, withJobLease } from "./jobs.ts";
 import { blockedTool } from "./policy.ts";
 import { displayText } from "./process.ts";
 import { progressText, registerProgress } from "./progress.ts";
-import { ENTRY_TYPE, type JobReference, type Progress, type RunOptions } from "./types.ts";
+import { ENTRY_TYPE, REMOVED_ENTRY_TYPE, type ExecutionDetails, type JobReference, type Progress, type RunOptions } from "./types.ts";
 import { registerControls, TOOL_NAMES } from "./controls.ts";
-import { scriptRenderers } from "./render.ts";
+import { inlineRenderers, workspaceRenderers, jobRenderers } from "./render.ts";
 import { executionEnvironment } from "./environment.ts";
+import { executionText, executionView } from "./execution.ts";
+import { backgroundActive, backgroundStatus, backgroundSummary, forgetBackground, runForeground, startBackground, stopBackground, stopSessionBackground } from "./background.ts";
+import { registerBackgroundPanel } from "./background-panel.ts";
 
 const timeoutSchema = Type.Number({ exclusiveMinimum: 0, maximum: 86400, description: "Total deadline in seconds, including preparation" });
 const purposeSchema = Type.String({ minLength: 1, maxLength: 300, description: "Brief user-facing purpose" });
-const result = (text: string, isError = false) => {
+const readyUrlSchema = Type.Optional(Type.String({description:"Use only a known loopback HTTP readiness endpoint. Omit for non-HTTP work; never invent an endpoint."}));
+const backgroundSchema = Type.Optional(Type.Union([
+  Type.Literal(false),
+  Type.Object({service:Type.Literal(true),readyUrl:readyUrlSchema},{additionalProperties:false,description:"Service: run until stopped or session shutdown. No runtimeSeconds field."}),
+  Type.Object({runtimeSeconds:Type.Number({exclusiveMinimum:0,maximum:7*86400}),readyUrl:readyUrlSchema},{additionalProperties:false,description:"Finite background work with an explicit runtime deadline. No service field."}),
+],{default:false,description:"Default false: foreground. Only requested independent long work uses a service or finite-job object, never both forms."}));
+const result = (text: string, isError = false, details: ExecutionDetails | undefined = undefined) => {
   const safe = displayText(text);
   const content = Buffer.byteLength(safe) > 49 * 1024 ? `${Buffer.from(safe).subarray(0, 48 * 1024).toString("utf8")}\n[Result truncated; inspect retained job files.]` : safe;
-  return { content: [{ type: "text" as const, text: content }], details: undefined, isError };
+  return { content: [{ type: "text" as const, text: content }], details, isError };
 };
 
 export default function tempScripts(pi: ExtensionAPI): void {
@@ -35,26 +43,26 @@ export default function tempScripts(pi: ExtensionAPI): void {
     pi.appendEntry(ENTRY_TYPE, reference);
     references.set(reference.id, reference);
   };
-  const collect = async (sessionId: string): Promise<void> => {
-    for (const reference of references.values()) {
-      if (!existsSync(reference.root)) { references.delete(reference.id); continue; }
-      try {
-        const job = await inspectJob(reference, sessionId);
-        if (job.state === "released" && await cleanupJob(reference, sessionId)) references.delete(reference.id);
-      } catch { /* Invalid, active, or unresolved jobs stay retained. Explicit inspection reports their errors. */ }
-    }
+  const forget = (reference: JobReference) => {
+    pi.appendEntry(REMOVED_ENTRY_TYPE, { id: reference.id });
+    references.delete(reference.id);
+    forgetBackground(reference.id);
   };
   pi.on("session_start", async (_event, ctx) => {
     references.clear();
     for (const entry of ctx.sessionManager.getEntries()) {
       if (entry.type === "custom" && entry.customType === ENTRY_TYPE && jobReference(entry.data)) references.set(entry.data.id, entry.data);
+      if (entry.type === "custom" && entry.customType === REMOVED_ENTRY_TYPE && entry.data !== null && typeof entry.data === "object" && "id" in entry.data && typeof entry.data.id === "string") references.delete(entry.data.id);
     }
   });
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (event,ctx) => {
+    if(event.reason==="reload") return;
     for (const operation of operations) operation.controller.abort();
     await Promise.all([...operations].map(operation => operation.done));
+    await stopSessionBackground(ctx.sessionManager.getSessionId());
   });
   const progress = registerProgress(pi, () => enabled);
+  registerBackgroundPanel(pi);
 
   pi.on("tool_call", event => {
     if (!enabled) {
@@ -90,10 +98,15 @@ export default function tempScripts(pi: ExtensionAPI): void {
   };
   const runGuidelines = [
     "Use script_inline or script_js for every new temporary helper; do not generate helpers in Python, Ruby, shell languages, or other runtimes.",
-    "Prefer dedicated file/search tools. Use script_inline or script_js for all commands, including Git, project startup, and tests.",
+    "For operations supported by active dedicated tools, prefer those tools over script_inline and script_js; managed scripts replace shell execution.",
+    "Use script_inline or script_js for commands only when dedicated tools are unavailable or insufficient, including Git, project startup, and tests.",
+    "Prefer script_inline when dependency-free code fits directly in the call. Several sequential commands do not require a script_js workspace.",
+    "Use script_js when dependencies, multiple files, repeated editing, or a reusable helper justify a workspace.",
+    "Successful disposable script_inline runs clean up automatically. Set keep:true only when the source or full evidence is still needed.",
+    "For script_inline and script_js, use foreground by default: omit background or set false. Background requires requested independent long-running work.",
     "Use script_inline or script_js instead of the blocked bash and powershell tools, including nested calls. Never bypass these gates.",
     "In script_inline and script_js, do not invoke PowerShell, including powershell.exe, pwsh/PowerShell 7, and .ps1 scripts.",
-    "For script_js workspaces, use read, write, edit, and available AST tools with their active safeguards.",
+    "For script_js workspaces, use active session file tools with their existing safeguards; no separate authoring plugin is required.",
     "Keep script_inline and script_js helpers in JavaScript. Maintained project code retains its required language and workflow.",
     "For script_js corrections, reuse retained workspaces and logs. Never restart quiet work just to obtain progress.",
     "In script_inline and script_js, use the managed exec helper for native commands; it uses argument arrays and shell:false.",
@@ -103,85 +116,131 @@ export default function tempScripts(pi: ExtensionAPI): void {
     "script_inline example: const {exec}=await import(process.env.PI_SCRIPT_RUNTIME); await exec('git',['status','--short'],{timeoutSeconds:10});",
     "For script_inline and script_js, exec throws on failure; set allowFailure:true only when inspecting an expected nonzero status.",
     "In script_inline and script_js, use input for finite stdin. Implement pipelines, glob expansion, and filesystem operations in JavaScript.",
-    "In script_inline and script_js, do not launch background jobs or interactive programs. Every run owns its deadline and child processes.",
+    "Use background:{runtimeSeconds:...} for finite long jobs, or background:{service:true} for requested services; timeoutSeconds is then the startup deadline.",
+    "For script_inline/script_js background, choose either service:true or runtimeSeconds, never both. Supply readyUrl only for a known real loopback endpoint.",
+    "Background jobs return promptly and survive native manual/automatic compaction and reload. Quit or session replacement stops owned jobs; use script_job status/logs/stop.",
+    "For background scripts, managed exec may omit its options object and inherit the parent lifetime. Foreground child commands still require deadlines.",
+    "Escape and manual compaction cancel foreground waiting, not the job. Inspect the fixed panel or script_job status/logs; use script_job stop to terminate.",
+    "Do not disable /temp-scripts while background work is active. Stop jobs before release; release immediately deletes their evidence.",
   ];
   pi.registerTool({
-    name: "script_inline", label: "Inline JavaScript", description: "Run small dependency-free ESM JavaScript in a supervised Node process. Top-level await works; print results with console.log. Required deadline, retained source/logs, separate cwd. Output tail is limited to 48 KiB/1800 lines; disk logs stop at 16 MiB. Not a sandbox.",
+    name: "script_inline", label: "Inline JavaScript", description: "Default foreground: run dependency-free ESM JavaScript directly with a total deadline and streamed output. Omit background or set false for normal commands. Background objects are only for requested independent work/services; timeoutSeconds then bounds startup (max120s). Safe successful foreground runs auto-clean; failures/artifacts/keep:true/background retain. Output:48KiB/1800 lines, disk cap:16MiB. Not a sandbox.",
     promptSnippet: "Run small temporary JavaScript helpers instead of inline shell or other interpreters",
     promptGuidelines: runGuidelines,
-    parameters: Type.Object({ purpose: purposeSchema, code: Type.String({ minLength: 1, maxLength: 32 * 1024 }), timeoutSeconds: timeoutSchema, cwd: Type.Optional(Type.String()) }),
+    parameters: Type.Object({ purpose: purposeSchema, code: Type.String({ minLength: 1, maxLength: 32 * 1024 }), timeoutSeconds: timeoutSchema, cwd: Type.Optional(Type.String()), keep: Type.Optional(Type.Boolean({description:"Preserve successful foreground source and logs"})), background:backgroundSchema }),
     executionMode: "sequential",
-    ...scriptRenderers,
+    ...inlineRenderers,
     async execute(_id, input, signal, onUpdate, ctx) {
       return supervised(signal, async ownedSignal => {
         const job = await createJob(ctx.sessionManager.getSessionId(), input.purpose, register);
         await writeFile(join(job.root, "work", "main.mjs"), input.code, { mode: 0o600 });
-        const output = await executeJob(job, job.sessionId, "main.mjs", [], { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, text => onUpdate?.(result(text))), inline: input.code });
-        return result(`Execution: ${output.status} · exit ${output.exitCode}\nJob: ${job.id}\nRun: ${output.run}\nCwd: ${output.cwd}\nElapsed: ${Math.round(output.elapsedMs)}ms\nSource: ${output.sourceHash}\nRetained: source, artifacts, stdout.log, stderr.log\n${output.truncated ? "Output tail (truncated):" : "Output:"}\n${output.output}`, output.status !== "succeeded");
+        const view = executionView("inline", resolve(ctx.cwd, input.cwd ?? "."), (text, details) => onUpdate?.(result(text, false, details)), { text: input.code, truncated: false });
+        view.start();
+        if(input.background){
+          const details=await startBackground(job,job.sessionId,"main.mjs",[],"inline",{...options(input.purpose,input.cwd,input.timeoutSeconds,ctx,ownedSignal,undefined),inline:input.code,onProgress:view.onProgress},{...input.background,startupSeconds:input.timeoutSeconds});
+          return result(backgroundSummary(input.purpose,details),false,details);
+        }
+        const completed = await runForeground(job, job.sessionId, "main.mjs", [], "inline", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), inline: input.code, onProgress: view.onProgress });
+        if(!completed.record) return result(backgroundSummary(input.purpose,completed),false,completed);
+        const output=completed.record;
+        const retention = await finishInline(job, job.sessionId, output, input.keep);
+        if (retention.state === "removed") forget(job);
+        const details = view.finish(output, retention);
+        return result(executionText(details), output.status !== "succeeded" || retention.state === "cleanup_failed", details);
       });
     },
   });
   pi.registerTool({
-    name: "script_js", label: "Workspace JavaScript", description: "Execute an existing .mjs/.js entry inside a managed job's work/ directory. Uses a fresh source snapshot, retained logs and artifacts, explicit cwd and total deadline. Set test:true for Node's test runner. Output limits match script_inline. No TypeScript or runtime compilation.",
+    name: "script_js", label: "Workspace JavaScript", description: "Run an existing .mjs/.js workspace entry from a fresh snapshot with visible source, commands, and logs. test:true uses Node tests. Optional background:{runtimeSeconds} or {service:true} returns after startup; timeoutSeconds then bounds startup (max120s), not lifetime. Workspaces remain until explicit release. No TypeScript or runtime compilation.",
     promptSnippet: "Execute and rerun developed JavaScript workspaces with retained evidence",
     promptGuidelines: [
       "Use script_job create before developing multi-file or dependency-based helpers with normal session file tools.",
       "For script_js outputs, use PI_SCRIPT_ARTIFACTS. Source snapshots mean import.meta.url refers to the snapshot, not work/.",
       "In script_js, import process.env.PI_SCRIPT_RUNTIME for progress(message) and exec(command,args,{timeoutSeconds,cwd?}).",
     ],
-    parameters: Type.Object({ job: Type.String(), purpose: purposeSchema, entry: Type.String(), args: Type.Optional(Type.Array(Type.String())), cwd: Type.Optional(Type.String()), timeoutSeconds: timeoutSchema, test: Type.Optional(Type.Boolean()) }),
-    executionMode: "sequential", ...scriptRenderers,
+    parameters: Type.Object({ job: Type.String(), purpose: purposeSchema, entry: Type.String(), args: Type.Optional(Type.Array(Type.String())), cwd: Type.Optional(Type.String()), timeoutSeconds: timeoutSchema, test: Type.Optional(Type.Boolean()),background:backgroundSchema }),
+    executionMode: "sequential", ...workspaceRenderers,
     async execute(_id, input, signal, onUpdate, ctx) {
       return supervised(signal, async ownedSignal => {
-        const output = await executeJob(lookup(input.job), ctx.sessionManager.getSessionId(), input.entry, input.args ?? [], { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, text => onUpdate?.(result(text))), test: input.test });
-        return result(`Execution: ${output.status} · exit ${output.exitCode}\nJob: ${output.job}\nRun: ${output.run}\nCwd: ${output.cwd}\nElapsed: ${Math.round(output.elapsedMs)}ms\nSource: ${output.sourceHash}\nRetained: source, artifacts, stdout.log, stderr.log\n${output.truncated ? "Output tail (truncated):" : "Output:"}\n${output.output}`, output.status !== "succeeded");
+        const view = executionView("workspace", resolve(ctx.cwd, input.cwd ?? "."), (text, details) => onUpdate?.(result(text, false, details)));
+        view.start();
+        if(input.background){
+          const details=await startBackground(lookup(input.job),ctx.sessionManager.getSessionId(),input.entry,input.args??[],"workspace",{...options(input.purpose,input.cwd,input.timeoutSeconds,ctx,ownedSignal,undefined),test:input.test,onProgress:view.onProgress},{...input.background,startupSeconds:input.timeoutSeconds});
+          return result(backgroundSummary(input.purpose,details),false,details);
+        }
+        const completed = await runForeground(lookup(input.job), ctx.sessionManager.getSessionId(), input.entry, input.args ?? [], "workspace", { ...options(input.purpose, input.cwd, input.timeoutSeconds, ctx, ownedSignal, undefined), test: input.test, onProgress: view.onProgress, onSource: view.onSource });
+        if(!completed.record) return result(backgroundSummary(input.purpose,completed),false,completed);
+        if(completed.source) view.onSource(completed.source);
+        const output=completed.record;
+        const details = view.finish(output, { state: "retained", reason: "Workspace available for edits and reruns until explicit release" });
+        return result(executionText(details), output.status !== "succeeded", details);
       });
     },
   });
   pi.registerTool({
-    name: "script_job", label: "Script workspace", description: "Manage JS helper jobs in owned OS temporary directories. Actions: create, list, inspect, dependencies, retain, pin, release, cleanup. Jobs persist across reload/resume in the owning session. Release makes a job eligible for cleanup after seven days; cleanup immediate:true deletes a released job now. Open/pinned/leased jobs are protected. Dependencies need exact versions, the company registry, and disabled lifecycle scripts.",
+    name: "script_job", label: "Script job", description: "Manage JavaScript jobs under ~/.pi-temp-scripts/jobs. Actions:create,list,inspect,status,logs,stop,dependencies,retain,pin,release,cleanup. Background status/logs/stop do not restart work. Running/uncertain jobs cannot be deleted. Release deletes stopped owned source,dependencies,artifacts,logs immediately. jobs:[ids] batches lifecycle actions. No expiry. Dependencies require exact versions; lifecycle scripts disabled.",
     promptSnippet: "Manage editable temporary workspaces, job dependencies, retention, and safe cleanup",
     promptGuidelines: [
       "For script_job dependencies, keep runtime packages inside the managed job, never in the project or global installation.",
       "Use script_job dependencies with exact package versions; never switch registries after an installation failure.",
-      "Before script_job release, copy requested deliverables to an approved durable path. Pinning cannot prevent OS temporary cleanup.",
-      "Use script_job release when evidence is no longer needed; cleanup immediate:true permits deleting that job's source, logs, and artifacts.",
+      "Before script_job release, copy requested deliverables to an approved durable path. Job storage is disposable, not a backup.",
+      "Use script_job release when source, logs, artifacts, and dependencies are no longer needed; it deletes them immediately. Batch with jobs:[ids].",
       "For script_job workspaces, normal file tools author scripts. Do not edit manifests, leases, dependency metadata, or recorded runs.",
     ],
-    parameters: Type.Object({ action: StringEnum(["create", "list", "inspect", "dependencies", "retain", "pin", "release", "cleanup"] as const), job: Type.Optional(Type.String()), purpose: Type.Optional(purposeSchema), dependencies: Type.Optional(Type.Record(Type.String(), Type.String())), timeoutSeconds: Type.Optional(timeoutSchema), immediate: Type.Optional(Type.Boolean()) }),
-    executionMode: "sequential", ...scriptRenderers,
+    parameters: Type.Object({ action: Type.Union([Type.Literal("create"), Type.Literal("list"), Type.Literal("inspect"),Type.Literal("status"),Type.Literal("logs"),Type.Literal("stop"), Type.Literal("dependencies"), Type.Literal("retain"), Type.Literal("pin"), Type.Literal("release"), Type.Literal("cleanup")]), job: Type.Optional(Type.String()), jobs: Type.Optional(Type.Array(Type.String(), { minItems: 1, maxItems: 50 })), purpose: Type.Optional(purposeSchema), dependencies: Type.Optional(Type.Record(Type.String(), Type.String())), timeoutSeconds: Type.Optional(timeoutSchema) }),
+    executionMode: "sequential", ...jobRenderers,
     async execute(_id, input, signal, onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();
+      if (input.job && input.jobs) throw new Error("Use job or jobs, not both");
+      if (input.jobs && !["release", "cleanup", "retain", "pin"].includes(input.action)) throw new Error("jobs is supported only for lifecycle actions");
+      if (["release", "cleanup", "retain", "pin"].includes(input.action)) {
+        const selected = [...new Set(input.jobs ?? (input.job ? [input.job] : []))];
+        if (!selected.length) throw new Error("Lifecycle actions require job or jobs");
+        const targets = selected.map(id => lookup(id));
+        const messages: string[] = [];
+        let failed = false;
+        for (const reference of targets) {
+          try {
+            if (input.action === "release" || input.action === "cleanup") {
+              if (input.action === "release") await releaseJob(reference, sessionId);
+              else await cleanupJob(reference, sessionId);
+              forget(reference);
+              messages.push(`Removed job ${reference.id}: owned source, dependencies, artifacts, and logs deleted.`);
+            } else {
+              const job = await setRetention(reference, sessionId, input.action === "pin" ? "pinned" : "open");
+              messages.push(`Job ${job.id}: ${job.state}; retained until explicit release. This storage is not a backup.`);
+            }
+          } catch {
+            failed = true;
+            messages.push(`Job ${reference.id}: operation failed; inspect ownership, state, and process lease before retrying.`);
+          }
+        }
+        return result(messages.join("\n"), failed);
+      }
       if (input.action === "create") {
         if (!input.purpose) throw new Error("create requires purpose");
-        await collect(sessionId);
         const job = await createJob(sessionId, input.purpose, register);
-        return result(`Job: ${job.id}\nSource directory: ${join(job.root, "work")}\nCreate entry: ${join(job.root, "work", "main.mjs")}\nRetention: open\nUse normal read/write/edit/AST tools on these paths.`);
+        return result(`Job: ${job.id}\nSource directory: ${join(job.root, "work")}\nCreate entry: ${join(job.root, "work", "main.mjs")}\nRetention: open\nUse active session file tools with their existing safeguards on these paths.`);
       }
       if (input.action === "list") {
-        await collect(sessionId);
         const entries: string[] = [];
-        for (const reference of references.values()) {
+        for (const reference of [...references.values()]) {
+          if (!existsSync(reference.root)) { forget(reference); continue; }
           try { const job = await inspectJob(reference, sessionId); entries.push(`${job.id} · ${job.state} · ${job.purpose}\n${join(job.root, "work")}`); }
           catch { entries.push(`${reference.id} · ownership or state unresolved; retained`); }
         }
         return result(entries.join("\n") || "No managed jobs in this session.");
       }
       const reference = lookup(input.job);
+      if(input.action==="status" || input.action==="logs" || input.action==="stop"){
+        const details=input.action==="stop"?await stopBackground(reference,sessionId):await backgroundStatus(reference,sessionId);
+        if(!details){const job=await inspectJob(reference,sessionId);return result(`Job: ${job.id}\nNo live controller in this Pi process. Persisted files remain; an unresolved lease must not be used to kill a saved PID.\nWork: ${join(job.root,"work")}`);}
+        return result(backgroundSummary(input.purpose??"Background job",details),details.status==="termination_unconfirmed",details);
+      }
       if (input.action === "inspect") {
         const job = await inspectJob(reference, sessionId);
         const { token: _token, ...publicJob } = job;
         return result(JSON.stringify({ ...publicJob, work: join(job.root, "work"), leased: existsSync(join(job.root, "lease")) }, null, 2));
-      }
-      if (input.action === "retain" || input.action === "pin" || input.action === "release") {
-        const state = input.action === "retain" ? "open" : input.action === "pin" ? "pinned" : "released";
-        const job = await setRetention(reference, sessionId, state);
-        return result(`Job: ${job.id}\nRetention: ${job.state}\n${job.state === "released" ? "Eligible for deletion after seven days; files remain available until cleanup." : "Files retained; OS temporary cleanup can still remove them."}`);
-      }
-      if (input.action === "cleanup") {
-        const removed = await cleanupJob(reference, sessionId, input.immediate);
-        if (removed) references.delete(reference.id);
-        return result(removed ? `Removed owned job directory: ${reference.root}` : "Retained: the released job has not reached seven days.");
       }
       if (!input.dependencies || !input.timeoutSeconds) throw new Error("dependencies requires dependencies and timeoutSeconds");
       return supervised(signal, ownedSignal => withJobLease(reference, sessionId, async (job, keepLease) => {
@@ -206,6 +265,5 @@ export default function tempScripts(pi: ExtensionAPI): void {
     pi.setActiveTools(next ? [...active, ...TOOL_NAMES] : active);
     enabled = next;
     if (!next) progress.clear();
-  }, () => operations.size > 0);
-  pi.on("session_start", async (_event, ctx) => { if (enabled) await collect(ctx.sessionManager.getSessionId()); });
+  }, () => operations.size > 0 || backgroundActive());
 }

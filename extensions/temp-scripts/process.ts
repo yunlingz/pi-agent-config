@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { stripVTControlCharacters } from "node:util";
 import type { ProcessResult, Progress, RunStatus } from "./types.ts";
+import { CommandLog } from "./commands.ts";
 
 const MAX_LOG_BYTES = 16 * 1024 * 1024;
 const MAX_RESULT_BYTES = 48 * 1024;
@@ -61,7 +62,7 @@ export interface ProcessOptions {
   args: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
-  timeoutSeconds: number;
+  timeoutSeconds?: number;
   stdoutPath: string;
   stderrPath: string;
   stdin?: string;
@@ -72,11 +73,13 @@ export interface ProcessOptions {
   maxLogBytes?: number;
   processGroup?: boolean;
   onOutput?: (chunk: Buffer, stream: "stdout" | "stderr") => Promise<void>;
+  onSpawn?: () => void;
+  untilStopped?: boolean;
 }
 
 export async function runProcess(options: ProcessOptions): Promise<ProcessResult> {
-  if (!Number.isFinite(options.timeoutSeconds) || options.timeoutSeconds <= 0 || options.timeoutSeconds > 86400) {
-    throw new Error("timeoutSeconds must be greater than zero and at most 86400");
+  if (options.timeoutSeconds === undefined ? !options.untilStopped : !Number.isFinite(options.timeoutSeconds) || options.timeoutSeconds <= 0 || options.timeoutSeconds > 7 * 86400) {
+    throw new Error("An explicit positive deadline (at most seven days) or authorized untilStopped execution is required");
   }
   if (!options.command || [options.command, options.cwd, ...options.args].some(value => value.includes("\0"))) {
     throw new Error("Executable, cwd, and arguments must be valid strings without NUL bytes");
@@ -94,6 +97,7 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessResult
   let stopped: Promise<boolean> | undefined;
   let ioFailure = false;
   let launchError: string | undefined;
+  const commands = new CommandLog();
   const stdout = createWriteStream(options.stdoutPath, { flags: "wx", mode: 0o600 });
   const stderr = createWriteStream(options.stderrPath, { flags: "wx", mode: 0o600 });
   const stdoutClosed = new Promise<void>(accept => stdout.once("close", accept));
@@ -119,16 +123,17 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessResult
     });
     child.once("exit", (code, signal) => { exitCode = code; exitSignal = signal; exited = true; accept(); });
   });
+  child.once("spawn", () => { try { options.onSpawn?.(); } catch { failIO(); } });
   const report = () => {
     try {
       options.onProgress?.({ phase: "running", elapsedMs: performance.now() - start, outputBytes: bytes,
-        lastOutputMs: lastOutput === null ? null : performance.now() - lastOutput, scriptReport, outputTail: displayText(tail.subarray(-8192).toString("utf8")) });
+        lastOutputMs: lastOutput === null ? null : performance.now() - lastOutput, scriptReport, outputTail: displayText(tail.subarray(-8192).toString("utf8")), commands: commands.snapshot(), commandsTruncated: commands.truncated });
     } catch { /* A disconnected progress consumer must not leave the child running. */ }
   };
   const abort = () => { reason ??= "cancelled"; void stop(); };
   options.signal?.addEventListener("abort", abort, { once: true });
   if (options.signal?.aborted) abort();
-  const timer = setTimeout(() => { reason ??= "timed_out"; void stop(); }, options.timeoutSeconds * 1000);
+  const timer = options.timeoutSeconds === undefined ? undefined : setTimeout(() => { reason ??= "timed_out"; void stop(); }, options.timeoutSeconds * 1000);
   const heartbeat = setInterval(report, options.heartbeatMs ?? 1000);
   let lastProgressAt = -Infinity;
   let lastOutputUpdate = -Infinity;
@@ -136,6 +141,10 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessResult
     if (value !== null && typeof value === "object" && "type" in value && value.type === "progress" && "message" in value && typeof value.message === "string") {
       scriptReport = displayText(value.message).slice(0, 500);
       if (performance.now() - lastProgressAt >= 500) { lastProgressAt = performance.now(); report(); }
+    }
+    if (value !== null && typeof value === "object" && "type" in value && value.type === "command" && "event" in value) {
+      commands.append(value.event);
+      report();
     }
   });
   const consume = async (input: NodeJS.ReadableStream | null, output: typeof stdout, stream: "stdout" | "stderr"): Promise<void> => {
@@ -190,5 +199,6 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessResult
     output, outputBytes: bytes, truncated: bytes > Buffer.byteLength(output) || reason === "output_limit",
     terminationConfirmed: confirmed,
     launchError,
+    commands: commands.snapshot(), commandsTruncated: commands.truncated,
   };
 }

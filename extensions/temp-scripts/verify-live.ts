@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { closeLiveSession, createLiveSession, parseLiveArguments } from "../../scripts/live-verification.ts";
 import { assertMcpDisabled, validateConfig } from "../../skills/sync-pi-config/scripts/verify.ts";
-import { ENTRY_TYPE, type JobReference, type RunResult } from "./types.ts";
+import { ENTRY_TYPE, type JobReference, type RunResult, type ExecutionDetails } from "./types.ts";
 
 const { packageDirectory, modelOverride } = parseLiveArguments(process.argv.slice(2));
 assert.equal(modelOverride, undefined, "Managed-script acceptance must retain the configured model");
@@ -16,14 +18,21 @@ const agentDirectory = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi",
 const settings = await validateConfig(agentDirectory, packageDirectory);
 assertMcpDisabled(settings);
 const temporary = await mkdtemp(join(tmpdir(), "temp-scripts-live-"));
+const previousStorage = process.env.PI_TEMP_SCRIPTS_DIR;
+process.env.PI_TEMP_SCRIPTS_DIR = join(temporary,"script-storage");
 let session: AgentSession | undefined;
 let phase = "loading isolated real Pi session";
 let requests = 0;
 let calls = 0;
 const owned = new Map<string, JobReference>();
 const events: AgentSessionEvent[] = [];
+const recordedRuns = new Map<string, RunResult>();
+const observedExecutions: ExecutionDetails[] = [];
 const heartbeat = setInterval(() => process.stderr.write(`[${new Date().toISOString()}] Managed scripts live: ${phase}; ${requests} requests, ${calls} tool calls\n`), 20_000);
 try {
+  assert(settings.defaultProvider && settings.defaultModel);
+  await mkdir(join(temporary,".pi"));
+  await writeFile(join(temporary,".pi","settings.json"),JSON.stringify({compaction:{enabled:false,keepRecentTokens:0,modelOverrides:{[`${settings.defaultProvider}/${settings.defaultModel}`]:{keepRecentTokens:0}}}}));
   const live = await createLiveSession({ packageDirectory, agentDirectory, cwd: temporary,
     extensionPaths: [join(dirname(fileURLToPath(import.meta.url)), "index.ts"), join(agentDirectory, "extensions", "code-anchor", "index.ts")],
     includeBuiltinTools: true,
@@ -48,6 +57,15 @@ try {
     for (const entry of live.manager.getEntries()) if (entry.type === "custom" && entry.customType === ENTRY_TYPE) {
       const reference = entry.data as JobReference;
       owned.set(reference.id, reference);
+    }
+    for (const message of live.session.messages) {
+      if (message.role !== "toolResult" || !["script_inline", "script_js"].includes(message.toolName)) continue;
+      const saved: unknown = message.details;
+      const details = saved as ExecutionDetails | undefined;
+      if (details?.kind === "script-execution" && details.record && !recordedRuns.has(details.record.run)) {
+        recordedRuns.set(details.record.run, details.record);
+        observedExecutions.push(details);
+      }
     }
   };
   session.subscribe(event => {
@@ -88,16 +106,23 @@ try {
   };
   const results = async (reference: JobReference): Promise<RunResult[]> => {
     const directory = join(reference.root, "runs");
-    const output: RunResult[] = [];
-    for (const name of await readdir(directory)) {
+    const output = [...recordedRuns.values()].filter(value => value.job === reference.id);
+    if (existsSync(directory)) for (const name of await readdir(directory)) {
       const file = join(directory, name, "result.json");
-      if (existsSync(file)) output.push(JSON.parse(await readFile(file, "utf8")) as RunResult);
+      if (existsSync(file) && !output.some(value => value.run === join(directory,name))) output.push(JSON.parse(await readFile(file, "utf8")) as RunResult);
     }
     return output;
   };
   console.log(`START: managed-script acceptance on ${model.provider}/${model.id}; reasoning ${reasoning}; real requests and approved registry downloads can incur charges`);
+  for(const name of ["ls","find","grep"]) assert(session.getActiveToolNames().includes(name),`Missing configured dedicated tool ${name}`);
+  await writeFile(join(temporary,"dedicated-tool.txt"),"DEDICATED_TOOL_MARKER\n");
+  const fileTurn=await run("natural dedicated file tools","List the immediate entries in this directory, locate dedicated-tool.txt by filename, then find DEDICATED_TOOL_MARKER within it and report its line number. Do not execute commands or change files.",["ls","find","grep"]);
+  assert(!fileTurn.some(event=>event.type==="tool_execution_end"&&["script_inline","script_js"].includes(event.toolName)));
   const gitTurn = await run("natural managed Git command", "Report the installed Git version using an executed command. Do not create a reusable workspace.", ["script_inline"]);
   assert(!gitTurn.some(event => event.type === "tool_execution_end" && event.toolName === "bash"));
+  assert.equal(observedExecutions.at(-1)?.mode,"inline");
+  assert.equal(observedExecutions.at(-1)?.retention?.state,"removed");
+  assert(!existsSync(latest().root));
   if (process.platform !== "win32") {
     await mkdir(join(temporary,"node_modules",".bin"),{recursive:true});
     await symlink(process.execPath,join(temporary,"node_modules",".bin","project-path-fixture"));
@@ -115,6 +140,13 @@ try {
   const expected = createHash("sha256").update(Array.from({ length: 100 }, (_, index) => String(index + 1)).join(",")).digest("hex");
   await run("natural inline JavaScript selection", "Use an executed program to compute SHA-256 of the UTF-8 string formed by integers 1 through 100 joined with commas and no trailing newline. Return only the digest. Do not create a reusable workspace.", ["script_inline"]);
   assert.equal(session.getLastAssistantText()?.trim(), expected);
+  await run("explicit inline retention", "Run one inline JavaScript helper that prints KEEP_SOURCE and set keep:true so its source and logs remain available. Do not create a workspace.",["script_inline"]);
+  const kept = latest();
+  assert(existsSync(kept.root));
+  assert.equal(observedExecutions.at(-1)?.retention?.state,"retained");
+  await run("inline artifact retention", "Run one inline JavaScript helper that writes artifact.txt containing ARTIFACT_OK under PI_SCRIPT_ARTIFACTS. Do not set keep:true. Report its path.",["script_inline"]);
+  assert(existsSync(latest().root));
+  assert((await results(latest())).some(value=>existsSync(join(value.artifacts,"artifact.txt"))));
   await run("natural developed-workspace selection", "Develop and execute a reusable temporary JavaScript helper with two source modules. main.mjs must import format.mjs. Export format(value) from format.mjs, returning `before:${value}`. main.mjs must print format(42). Also create and run a Node test file for format. Keep the workspace for later correction. Do not use the project directory for helper source.", ["script_job", "write", "script_js"]);
   const job = latest();
   const work = join(job.root, "work");
@@ -138,16 +170,20 @@ try {
   const blocked = await run("blanket Bash preference and recovery", "Report Git's version. The native bash tool is blocked; use the supported managed execution route without retrying another shell.", ["script_inline"]);
   assert(!blocked.some(event => event.type === "tool_execution_end" && event.toolName === "bash"));
   // Deterministic integration forces direct and nested shell attempts. Live selection must not require the model to violate its guidance.
-  await run("PowerShell rejection in managed execution", "Run one inline JavaScript test using the managed runtime exec helper. Attempt pwsh with argument --version, then powershell.exe with argument --version. Catch each expected rejection and print POWERSHELL_BLOCKED for each. Do not launch either through raw child_process or another program.", ["script_inline"]);
-  assert((await results(latest())).some(value => value.output.match(/POWERSHELL_BLOCKED/gu)?.length === 2));
   session.setActiveToolsByName(session.getActiveToolNames().filter(name => name !== "bash"));
   await run("Bash-disabled natural execution", "Use an executed program to list the squares of integers 1 through 5 as JSON. Do not create a reusable workspace.", ["script_inline"]);
   assert(!session.getActiveToolNames().includes("bash"));
   const streaming = await run("live native output streaming", "Run one inline JavaScript helper. Use the managed exec helper to launch Node.js code that prints STREAM_EARLY to stdout, prints STREAM_ERROR to stderr, waits two seconds, then prints STREAM_LATE. Do not print the returned output again. Use a five-second child deadline and a ten-second total deadline.", ["script_inline"]);
-  const partials = streaming.flatMap(event => event.type === "tool_execution_update" && event.toolName === "script_inline" ? [JSON.stringify(event.partialResult)] : []);
+  const partials = streaming.flatMap(event => {
+    if (event.type !== "tool_execution_update" || event.toolName !== "script_inline") return [];
+    const partial = event.partialResult as { details?: ExecutionDetails };
+    return [partial.details?.output ?? ""];
+  });
   assert(partials.some(text => text.includes("STREAM_EARLY") && !text.includes("STREAM_LATE")));
   assert(partials.some(text => text.includes("STREAM_ERROR")));
   assert((await results(latest())).some(value => value.output.includes("STREAM_LATE")));
+  assert(observedExecutions.at(-1)?.commands.some(command => command.status === "succeeded"));
+  assert(observedExecutions.at(-1)?.source?.text.includes("exec"));
   const quiet = await run("real quiet-script heartbeat", "Run one inline JavaScript helper that waits 22 seconds with no stdout or stderr during the wait, then prints QUIET_FINISHED. Give it a 30-second execution deadline. Do not add a script heartbeat or create another monitor.", ["script_inline"]);
   assert(quiet.some(event => event.type === "tool_execution_update" && event.toolName === "script_inline" && /elapsed 20\.\ds/u.test(JSON.stringify(event.partialResult))), "The host must report progress while the actual script is quiet");
   await run("failure evidence", "Run one inline JavaScript helper that prints EXPECTED_FAILURE and sets process.exitCode=7. It must not throw. Use a five-second execution deadline. This failure is intentional; report it without retrying.", ["script_inline"], ["script_inline"]);
@@ -157,20 +193,71 @@ try {
   phase = "cancelling an actual live-selected script";
   let requestedAbort = false;
   const unsubscribe = session.subscribe(event => {
-    if (event.type === "tool_execution_update" && event.toolName === "script_inline" && !requestedAbort) {
+    if (event.type === "tool_execution_update" && event.toolName === "script_inline" && (event.partialResult as {details?:ExecutionDetails}).details?.status === "running" && !requestedAbort) {
       requestedAbort = true;
       setTimeout(() => { void live.session.abort(); }, 150);
     }
   });
   const abortTimer = setTimeout(() => { void live.session.abort(); }, 120_000);
   try {
-    await session.prompt("Run one inline JavaScript helper that waits 30 seconds before printing CANCEL_UNEXPECTED. Give it a 40-second execution deadline. The harness will cancel the tool during execution; do not retry.");
+    await session.prompt("Run one inline JavaScript helper that prints WAITING_INTERRUPTION, then waits 30 seconds. Give it a 40-second deadline. The harness will interrupt waiting; the job must continue until explicitly stopped. Do not retry.");
     await session.waitForIdle();
     refresh();
     assert(requestedAbort);
-    assert((await results(latest())).some(value => value.status === "cancelled" && value.terminationConfirmed));
-    console.log("PASS: live cancellation stopped the selected process and retained its run record");
+    assert(existsSync(join(latest().root,"lease")),"Interrupted foreground process must continue");
+    console.log("PASS: live interruption released the agent while its owned foreground job continued");
   } finally { clearTimeout(abortTimer); unsubscribe(); }
+  const interruptedJob=latest();
+  await run("stop interrupted foreground job",`Stop job ${interruptedJob.id} using script_job stop. Do not release it yet.`,["script_job"]);
+  assert((await results(interruptedJob)).some(value=>value.status==="cancelled"&&value.terminationConfirmed));
+
+  const serviceTick=join(temporary,"live-service-tick.json");
+  await writeFile(join(temporary,"live-service.mjs"),`import {writeFileSync,renameSync} from "node:fs";let tick=0;setInterval(()=>{const path=${JSON.stringify(serviceTick)};writeFileSync(path+".next",JSON.stringify({pid:process.pid,tick:++tick}));renameSync(path+".next",path);},50);console.log("LIVE_SERVICE_STARTED");`);
+  await run("nonblocking background service", "Start the existing live-service.mjs with Node as a managed background service. Use script_inline, background service:true, and a five-second startup deadline. This worker has no HTTP endpoint; omit readiness URL. Keep it running for later queries; do not detach child processes manually.",["script_inline"]);
+  const serviceJob=latest();
+  const waitTick=async()=>{
+    const deadline=Date.now()+5000;
+    while(!existsSync(serviceTick)){assert(Date.now()<deadline,"Service did not start");await new Promise(accept=>setTimeout(accept,20));}
+    return JSON.parse(await readFile(serviceTick,"utf8")) as {pid:number;tick:number};
+  };
+  const beforeCompaction=await waitTick();
+  await run("new query during background service","Reply with exactly QUERY_WHILE_RUNNING. Do not use tools.",[]);
+  assert.equal(session.getLastAssistantText()?.trim(),"QUERY_WHILE_RUNNING");
+  phase="native real-provider manual compaction with an active service";
+  const compactTimer=setTimeout(()=>session?.abortCompaction(),120000);
+  try{await session.compact();}catch(error){
+    const message=error instanceof Error?error.message:"";
+    console.error(JSON.stringify({compactionFailure:{nothingToCompact:/Nothing to compact|Already compacted/u.test(message),timeout:/timeout|timed out/iu.test(message),auth:/authentication|api key|unauthorized/iu.test(message),errorName:error instanceof Error?error.name:"unknown"}}));
+    throw error;
+  }finally{clearTimeout(compactTimer);}
+  const afterCompaction=await waitTick();
+  assert.equal(afterCompaction.pid,beforeCompaction.pid);
+  assert(afterCompaction.tick>beforeCompaction.tick);
+  await session.reload();
+  assert.equal((await waitTick()).pid,beforeCompaction.pid);
+  await run("background logs after native compaction and reload",`Use script_job logs for job ${serviceJob.id}. Confirm LIVE_SERVICE_STARTED without stopping it.`,["script_job"]);
+  await run("explicit service shutdown",`Stop background job ${serviceJob.id} using script_job stop. Preserve its logs until final release.`,["script_job"]);
+  assert((await results(serviceJob)).some(value=>value.status==="cancelled"&&value.terminationConfirmed));
+  const reservation = createServer();
+  await new Promise<void>((accept, reject) => {
+    reservation.once("error", reject);
+    reservation.listen(0, "127.0.0.1", accept);
+  });
+  const address = reservation.address();
+  await new Promise<void>((accept, reject) => reservation.close(error => error ? reject(error) : accept()));
+  assert(address && typeof address !== "string");
+  const readyUrl = `http://127.0.0.1:${address.port}/ready`;
+  await writeFile(join(temporary, "live-http-service.mjs"), `import http from "node:http";http.createServer((request,response)=>{response.statusCode=request.url==="/ready"?200:404;response.end("LIVE_HTTP_OK");}).listen(${address.port},"127.0.0.1",()=>console.log("LIVE_HTTP_STARTED"));`);
+  const httpTurn = await run("background HTTP readiness", `Start the existing live-http-service.mjs with Node through script_inline as a managed service. Use background service:true with the known readyUrl ${readyUrl} and a five-second startup deadline. Keep it running for the next check.`, ["script_inline"]);
+  const httpJob = latest();
+  const httpResult = httpTurn.findLast(event => event.type === "tool_execution_end" && event.toolName === "script_inline");
+  assert(httpResult?.type === "tool_execution_end");
+  assert.equal((httpResult.result.details as ExecutionDetails).background?.readiness, "ready");
+  const response = await fetch(readyUrl, { signal: AbortSignal.timeout(5000) });
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "LIVE_HTTP_OK");
+  await run("stop ready HTTP service", `Stop job ${httpJob.id} through script_job stop. Preserve its records until final release.`, ["script_job"]);
+  assert((await results(httpJob)).some(value => value.status === "cancelled" && value.terminationConfirmed));
   await run("pin and retained evidence", `Pin job ${job.id}. Inspect it and report its retention state. Do not delete anything.`, ["script_job"]);
   assert.equal((JSON.parse(await readFile(join(job.root, "manifest.json"), "utf8")) as { state: string }).state, "pinned");
   await session.prompt("/temp-scripts off");
@@ -183,15 +270,31 @@ try {
   await session.prompt("/temp-scripts on");
   assert(session.getActiveToolNames().includes("script_inline"));
   await run("re-enabled managed execution", "Report Git's version through the supported execution route. Managed scripts are now enabled again.", ["script_inline"]);
-  await run("release and exact cleanup", "All acceptance evidence has now been checked. Release every managed job in this session, then clean each immediately. You may delete their scripts, dependency files, logs, and artifacts. Do not delete this session directory or anything else.", ["script_job"]);
+  await run("release and exact cleanup", "All acceptance evidence has now been checked. List remaining jobs, then release them together using jobs:[ids]. Release deletes each job immediately. You may delete their source, dependencies, artifacts, and logs. Do not delete this session directory or anything else.", ["script_job"]);
   for (const reference of owned.values()) assert(!existsSync(reference.root), `Job was not removed: ${reference.id}`);
   assert.equal(errors.length, 0);
-  console.log(`PASS: real-provider selection, managed Git/project startup/tests, authoring, AST, reload, dependency installation/rejection/recovery, blanket Bash/PowerShell gates, Bash-disabled execution, quiet progress, failures, deadlines, cancellation, pin/release/cleanup; ${requests} requests, ${calls} tool calls`);
+  console.log(`PASS: real-provider selection; commands/startup/tests; authoring; dependencies; shell gates; output/deadlines; interruption; services/readiness; native compaction/reload; release/cleanup; ${requests} requests, ${calls} tool calls`);
 } catch (error) {
-  console.error(JSON.stringify({ phase, requests, calls, failure: error instanceof assert.AssertionError ? error.message : error instanceof Error ? error.name : "Unknown failure" }));
+  if (phase.includes("background") || phase.includes("service")) {
+    // These sources use synthetic fixtures only. Provider diagnostics remain private.
+    const backgroundCalls = events.flatMap(event => {
+      if (event.type !== "tool_execution_start" || event.toolName !== "script_inline") return [];
+      const input = event.args as { background?: object | false; timeoutSeconds?: number; code?: string };
+      return input.background ? [{ background: input.background, timeoutSeconds: input.timeoutSeconds, source: input.code }] : [];
+    });
+    const toolErrors = events.flatMap(event => {
+      if (event.type !== "tool_execution_end" || !event.isError) return [];
+      const content: ToolResultMessage["content"] = event.result.content;
+      return [{ tool: event.toolName, text: content.filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 2000) }];
+    });
+    console.error(JSON.stringify({ backgroundCalls: backgroundCalls.slice(-2), toolErrors: toolErrors.slice(-2) }));
+  }
+  console.error(JSON.stringify({ phase, requests, calls, failure: error instanceof assert.AssertionError ? error.message : error instanceof Error ? error.name : "Unknown failure", executionStates:observedExecutions.slice(-3).map(value=>({mode:value.mode,status:value.status,background:value.background,retention:value.retention,truncated:value.record?.truncated,commands:value.commands.map(command=>({status:command.status,truncated:command.truncated}))})),executionFlags:events.flatMap(event=>event.type==="tool_execution_start"&&event.toolName==="script_inline"?[{background:(event.args as {background?:object}).background,keep:(event.args as {keep?:boolean}).keep}]:[]) }));
   throw new Error(`Managed-script live acceptance failed during ${phase}; private diagnostics withheld`);
 } finally {
   clearInterval(heartbeat);
+  if (previousStorage === undefined) delete process.env.PI_TEMP_SCRIPTS_DIR;
+  else process.env.PI_TEMP_SCRIPTS_DIR = previousStorage;
   try { if (session) await closeLiveSession(session); }
   finally {
     for (const reference of owned.values()) {

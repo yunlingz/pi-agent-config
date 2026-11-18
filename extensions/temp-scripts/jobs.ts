@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runProcess } from "./process.ts";
-import { JOB_PREFIX, RETENTION_MS, type JobManifest, type JobReference, type RunOptions, type RunResult } from "./types.ts";
+import { JOB_PREFIX, type JobManifest, type JobReference, type RunOptions, type RunResult, type RetentionResult } from "./types.ts";
 import { executionEnvironment } from "./environment.ts";
+import { jobDirectory, validateJobLocation } from "./storage.ts";
 
 export function inside(root: string, target: string): boolean {
   const local = relative(root, target);
@@ -25,9 +25,8 @@ export async function saveManifest(job: JobManifest): Promise<void> {
 }
 
 export async function inspectJob(reference: JobReference, sessionId: string): Promise<JobManifest> {
-  const parent = await realpath(tmpdir());
   const root = resolve(reference.root);
-  if (dirname(root) !== parent || !basename(root).startsWith(JOB_PREFIX)) throw new Error("Job root is outside the owned temporary namespace");
+  await validateJobLocation(root);
   const metadata = await lstat(root);
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || await realpath(root) !== root) throw new Error("Job root is not its original directory");
   if (process.getuid && metadata.uid !== process.getuid()) throw new Error("Job root belongs to another user");
@@ -48,16 +47,16 @@ export async function inspectJob(reference: JobReference, sessionId: string): Pr
 }
 
 export async function createJob(sessionId: string, purpose: string, register: (job: JobReference) => void): Promise<JobManifest> {
-  const root = await mkdtemp(join(await realpath(tmpdir()), JOB_PREFIX));
+  const root = await mkdtemp(join(await jobDirectory(true), JOB_PREFIX));
   let registered = false;
   try {
     const job: JobManifest = { format: 1, id: randomUUID(), root, token: randomUUID(), sessionId, purpose, createdAt: Date.now(), state: "open", dependencies: {} };
     await saveManifest(job);
     register({ id: job.id, root, token: job.token });
     registered = true;
-    await mkdir(join(root, "work"));
-    await mkdir(join(root, "runs"));
-    await writeFile(join(root, "package.json"), JSON.stringify({ private: true, type: "module" }));
+    await mkdir(join(root, "work"), { mode: 0o700 });
+    await mkdir(join(root, "runs"), { mode: 0o700 });
+    await writeFile(join(root, "package.json"), JSON.stringify({ private: true, type: "module" }), { mode: 0o600 });
     return job;
   } finally {
     if (!registered) await rm(root, { recursive: true, force: true });
@@ -67,7 +66,7 @@ export async function createJob(sessionId: string, purpose: string, register: (j
 export async function withJobLease<T>(reference: JobReference, sessionId: string, action: (job: JobManifest, keepLease: () => void) => Promise<T>): Promise<T> {
   const job = await inspectJob(reference, sessionId);
   const lease = join(job.root, "lease");
-  try { await mkdir(lease); }
+  try { await mkdir(lease, { mode: 0o700 }); }
   catch { throw new Error("Job is active or has an unresolved process lease; inspect it before recovery"); }
   let retain = false;
   try {
@@ -81,22 +80,49 @@ export async function withJobLease<T>(reference: JobReference, sessionId: string
 export async function setRetention(reference: JobReference, sessionId: string, state: JobManifest["state"]): Promise<JobManifest> {
   return withJobLease(reference, sessionId, async job => {
     job.state = state;
-    if (state === "released") job.releasedAt = Date.now();
-    else delete job.releasedAt;
     await saveManifest(job);
     return job;
   });
 }
 
-export async function cleanupJob(reference: JobReference, sessionId: string, immediate = false, now = Date.now()): Promise<boolean> {
+export async function cleanupJob(reference: JobReference, sessionId: string): Promise<boolean> {
   return withJobLease(reference, sessionId, async job => {
     if (job.state !== "released") throw new Error("Release the job before cleanup; open and pinned jobs are protected");
-    if (!immediate && (typeof job.releasedAt !== "number" || now - job.releasedAt < RETENTION_MS)) return false;
     await inspectJob(reference, sessionId);
     await rm(job.root, { recursive: true, force: false, maxRetries: 3 });
     if (existsSync(job.root)) throw new Error("Cleanup did not remove the owned job directory");
     return true;
   });
+}
+
+/** Release is an explicit end-of-work decision, unlike successful execution during development. */
+export async function releaseJob(reference: JobReference, sessionId: string): Promise<boolean> {
+  await setRetention(reference, sessionId, "released");
+  return cleanupJob(reference, sessionId);
+}
+
+export async function finishInline(reference: JobReference, sessionId: string, output: RunResult, keep = false): Promise<RetentionResult> {
+  if (!output.terminationConfirmed) return { state: "retained", reason: "Process termination is uncertain" };
+  if (output.status !== "succeeded") return { state: "retained", reason: `Execution ${output.status}; diagnostic evidence preserved` };
+  if (keep) return { state: "retained", reason: "Explicit keep request" };
+  if (output.truncated || output.commandsTruncated || output.commands.some(command => command.truncated)) return { state: "retained", reason: "Output or command evidence is truncated" };
+  if (output.commands.some(command => command.status !== "succeeded")) return { state: "retained", reason: "Unsuccessful or unfinished child command evidence" };
+  try {
+    await inspectJob(reference, sessionId);
+    const rootEntries = await readdir(reference.root);
+    const workEntries = await readdir(join(reference.root, "work"));
+    const artifacts = await readdir(output.artifacts);
+    const runEntries = await readdir(output.run);
+    if (artifacts.length || workEntries.some(name => name !== "main.mjs")
+      || rootEntries.some(name => !["manifest.json", "package.json", "work", "runs"].includes(name))
+      || runEntries.some(name => !["source", "artifacts", "stdout.log", "stderr.log", "request.json", "result.json"].includes(name) && !name.startsWith("child-"))) {
+      return { state: "retained", reason: "Generated artifacts or additional workspace files" };
+    }
+    await releaseJob(reference, sessionId);
+    return { state: "removed", reason: "Successful one-time inline run; temporary files removed" };
+  } catch {
+    return { state: "cleanup_failed", reason: "Cleanup or artifact inspection failed; inspect the owned job before retrying" };
+  }
 }
 
 async function snapshot(source: string, destination: string): Promise<string> {
@@ -106,7 +132,7 @@ async function snapshot(source: string, destination: string): Promise<string> {
   const copy = async (from: string, to: string): Promise<void> => {
     const directory = await lstat(from);
     if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error("Source directory must not be a link");
-    await mkdir(to);
+    await mkdir(to, { mode: 0o700 });
     const entries = (await readdir(from, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const path = join(from, entry.name);
@@ -143,12 +169,15 @@ export async function executeJob(reference: JobReference, sessionId: string, ent
     if (!runs.isDirectory() || runs.isSymbolicLink()) throw new Error("Run directory must not be a link");
     const run = await mkdtemp(join(job.root, "runs", "run-"));
     const artifacts = join(run, "artifacts");
-    await mkdir(artifacts);
+    await mkdir(artifacts, { mode: 0o700 });
     const stdoutPath = join(run, "stdout.log");
     const stderrPath = join(run, "stderr.log");
     const sourceHash = await snapshot(source, join(run, "source"));
     const target = join(run, "source", relative(source, entryPath));
     if (options.inline === undefined && !(await stat(target)).isFile()) throw new Error("Entry point must be a regular file");
+    const sourceBytes = await readFile(target);
+    const shown = sourceBytes.subarray(0, 32 * 1024);
+    options.onSource?.({ text: shown.toString("utf8"), path: target, truncated: shown.length !== sourceBytes.length });
     const cwd = await realpath(options.cwd);
     const record = { job: job.id, run, cwd, sourceHash, stdoutPath, stderrPath, artifacts };
     const runtime = fileURLToPath(new URL("./runtime.ts", import.meta.url));
@@ -164,7 +193,7 @@ export async function executeJob(reference: JobReference, sessionId: string, ent
       const result = await runProcess({
         command: process.execPath,
         args: options.inline !== undefined ? ["--input-type=module", "-"] : [...(options.test ? ["--test"] : []), target, ...args],
-        stdin: options.inline, cwd, timeoutSeconds: remaining,
+        stdin: options.inline, cwd, timeoutSeconds: options.untilStopped ? undefined : remaining, untilStopped: options.untilStopped, onSpawn: options.onSpawn,
         signal: options.signal, onProgress: options.onProgress, stdoutPath, stderrPath, ipc: true,
         env: { ...environment, PI_SCRIPT_JOB: job.id, PI_SCRIPT_WORK: source, PI_SCRIPT_RUN: run, PI_SCRIPT_ARTIFACTS: artifacts, PI_SCRIPT_RUNTIME: runtime },
       });
