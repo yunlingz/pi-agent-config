@@ -62,7 +62,7 @@ export default function tempScripts(pi: ExtensionAPI): void {
       try {
         const job = await inspectJob(reference, ctx.sessionManager.getSessionId());
         references.set(job.id, { ...reference, purpose: job.purpose });
-        panels.set({ id: job.id, purpose: job.purpose, state: job.state === "pinned" ? "pinned" : "retained", reason: "Registered files remain until explicit release" });
+        stored(job, "Registered files remain until explicit release");
       } catch {
         panels.set({ id: reference.id, purpose: reference.purpose ?? "Managed job", state: "unresolved", reason: "Inspect ownership, state, and process lease before cleanup" });
       }
@@ -76,7 +76,10 @@ export default function tempScripts(pi: ExtensionAPI): void {
   });
   const progress = registerProgress(pi, () => enabled);
   const panels = registerJobPanels(pi);
-  const stored = (job: JobManifest, reason: string) => panels.set({ id: job.id, purpose: job.purpose, state: job.state === "pinned" ? "pinned" : "retained", reason });
+  const stored = (job: JobManifest, reason: string) => {
+    if (job.state === "released") panels.remove(job.id);
+    else panels.set({ id: job.id, purpose: job.purpose, state: job.state === "pinned" ? "pinned" : "retained", reason });
+  };
   const tracking = async <T>(reference: JobReference, sessionId: string, action: (job: JobManifest) => Promise<T>): Promise<T> => {
     const job = await inspectJob(reference, sessionId);
     panels.set({ id: job.id, purpose: job.purpose, state: "running", reason: "Execution owns these files" });

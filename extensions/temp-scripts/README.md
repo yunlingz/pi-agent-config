@@ -161,6 +161,7 @@ Compact panels use this layout:
 ```
 
 Retained jobs do not fade between turns. Releasing a job removes it from both panels.
+Released records stay out of the retention panel, even when legacy files remain available for explicit inspection or cleanup.
 
 `script_job dependencies` accepts exact package versions and installs within the job only.
 Resolution uses `https://packagefeedproxy.microsoft.io/npm/`, Microsoft feed tarball hosts, a retained lockfile, disabled lifecycle scripts, and explicit deadlines.
