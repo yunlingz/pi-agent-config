@@ -19,6 +19,7 @@
 !/scripts/live-verification.ts
 !/scripts/live-verification.test.ts
 !/scripts/verify-extensions.ts
+!/scripts/verify-guidance.ts
 !/licenses/
 !/licenses/ste/
 !/licenses/ste/LICENSE
@@ -115,6 +116,8 @@
 !/themes/README.md
 !/themes/verify.ts
 !/skills/
+!/skills/maintain-agent-guidance/
+!/skills/maintain-agent-guidance/SKILL.md
 !/skills/sync-pi-config/
 !/skills/sync-pi-config/SKILL.md
 !/skills/sync-pi-config/scripts/
