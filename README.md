@@ -65,12 +65,14 @@ It sends selected context, not the full conversation, and retains 64k gateway-co
 `/web-search on|off|status` controls the session preference. Powerline shows `web: on`, `web: off`, `web: unavailable`, or `web: invalid setting`.
 Configuration edits take effect on `/reload`. The extension uses TypeScript without a build step or MCP.
 
-The local [managed scripts extension](extensions/temp-scripts/README.md) provides `script_inline`, `script_js`, and `script_job`.
-It runs JavaScript helpers and native commands in fresh supervised Node.js processes, with streamed output and retained workspaces.
+The local [node-scripts extension](extensions/node-scripts/README.md) provides one ESM workspace per Pi session and nine small tools.
+It runs single-use `.mjs` jobs with Pi's Node binary and inherited environment, plus npm dependency operations, `rm`, and `mkdir`.
+Timed jobs wait for a result; indefinite background jobs return after startup and survive compaction/reload. Interrupted timed jobs are deprecated.
+The agent queries status when needed. There are no proactive callbacks, source snapshots, or automatic log cleanup.
 When enabled, it blocks agent-issued Bash and PowerShell calls; manual user shell commands remain unchanged.
-`/temp-scripts on|off|status` controls the branch preference. Powerline displays `scripts: on` or `scripts: off`.
-Normal session tools author scripts. CodeAnchor supplies optional hashline/AST behavior without a runtime dependency between the extensions.
-The extension uses no third-party runtime packages. Its [README](extensions/temp-scripts/README.md) describes retention and compatibility limits.
+`/node-scripts on|off|status|expand|collapse` controls the branch preference and panel.
+Powerline displays exactly `node-scripts: on`, `node-scripts: off`, or `node-scripts: error`.
+[`pi-node-scripts.json`](pi-node-scripts.json) and its [schema](pi-node-scripts.schema.json) configure the workspace root and npm registry.
 
 Autoformat is not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
 
@@ -138,11 +140,11 @@ node themes/verify.ts <installed-pi-package-directory>
 node skills/sync-pi-config/scripts/verify.ts <installed-pi-package-directory>
 ```
 
-The managed-script feature has separate real-provider and terminal checks:
+The node-scripts feature has separate real-provider and terminal checks:
 
 ```text
-node extensions/temp-scripts/verify-live.ts <installed-pi-package-directory>
-node extensions/temp-scripts/verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>
+node extensions/node-scripts/verify-live.ts <installed-pi-package-directory>
+node extensions/node-scripts/verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>
 ```
 
 Offline plugin tests use controlled responses and synthetic models. They need no service credentials or external model requests.

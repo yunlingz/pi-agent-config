@@ -66,8 +66,8 @@
         "color": "muted"
       },
       {
-        "id": "temp_scripts",
-        "statusKey": "temp-scripts",
+        "id": "node_scripts",
+        "statusKey": "node-scripts",
         "position": "left",
         "color": "muted"
       },
@@ -84,7 +84,7 @@
         "thinking",
         "custom:web_search",
         "custom:code_anchor",
-        "custom:temp_scripts",
+        "custom:node_scripts",
         "shell_mode",
         "path",
         "git",

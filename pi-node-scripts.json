@@ -1,0 +1,5 @@
+{
+  "$schema": "./pi-node-scripts.schema.json",
+  "rootFolder": "~/.pi-node-scripts",
+  "npmRegistry": "https://packagefeedproxy.microsoft.io/npm/"
+}

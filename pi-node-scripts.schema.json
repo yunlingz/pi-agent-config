@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi node-scripts settings",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "rootFolder": {
+      "type": "string",
+      "minLength": 1,
+      "default": "~/.pi-node-scripts",
+      "description": "Absolute or home-relative parent of per-session workspaces. No automatic migration or cleanup."
+    },
+    "npmRegistry": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://",
+      "default": "https://packagefeedproxy.microsoft.io/npm/",
+      "description": "Credential-free HTTPS registry used for npm dependency operations."
+    }
+  }
+}

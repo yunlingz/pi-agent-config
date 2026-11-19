@@ -8,6 +8,8 @@
 !settings.json
 !web-search.json
 !web-search.schema.json
+!/pi-node-scripts.json
+!/pi-node-scripts.schema.json
 !README.md
 !/tsconfig.json
 !/scripts/
@@ -51,10 +53,10 @@
 !/extensions/web-search/README.md
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
-!/extensions/temp-scripts/
-!/extensions/temp-scripts/*.ts
-!/extensions/temp-scripts/README.md
-!/extensions/temp-scripts/AGENTS.md
+!/extensions/node-scripts/
+!/extensions/node-scripts/*.ts
+!/extensions/node-scripts/README.md
+!/extensions/node-scripts/AGENTS.md
 !/extensions/code-anchor/
 !/extensions/code-anchor/README.md
 !/extensions/code-anchor/controls.ts

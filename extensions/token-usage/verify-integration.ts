@@ -265,11 +265,11 @@ try {
   const config = configApi.parsePowerlineConfig(globalSettings.powerline, Object.keys(presets.PRESETS));
   assert.deepEqual(config.invalidLayoutSegments, []);
   assert.deepEqual(config.invalidDisabledSegments, []);
-  assert.deepEqual(config.customItems.map((item) => item.id), ["web_search", "code_anchor", "temp_scripts", "token_usage"]);
+  assert.deepEqual(config.customItems.map((item) => item.id), ["web_search", "code_anchor", "node_scripts", "token_usage"]);
   const preset = presets.getPreset(config.preset);
   const layout = configApi.mergeSegmentsWithCustomItems(preset, config.customItems, config);
   assert.deepEqual(layout.leftSegments, [
-    "model", "thinking", "custom:web_search", "custom:code_anchor", "custom:temp_scripts", "shell_mode", "path", "git", "queue",
+    "model", "thinking", "custom:web_search", "custom:code_anchor", "custom:node_scripts", "shell_mode", "path", "git", "queue",
     "context_pct", "custom:token_usage",
   ]);
   assert.deepEqual(layout.rightSegments, preset.rightSegments);
@@ -300,14 +300,14 @@ try {
       assert.equal(tui.visibleWidth(codeAnchor.content), status.length);
       assert.equal(segments.renderSegment("extension_statuses", context).visible, false);
     }
-    for (const status of ["scripts: on", "scripts: off"]) {
-      statuses.set("temp-scripts", status);
-      const scripts = segments.renderSegment("custom:temp_scripts", context);
+    for (const status of ["node-scripts: on", "node-scripts: off", "node-scripts: error"]) {
+      statuses.set("node-scripts", status);
+      const scripts = segments.renderSegment("custom:node_scripts", context);
       assert.equal(scripts.visible, true);
       assert.equal(scripts.content, theme.fg("muted", status));
       assert.equal(tui.visibleWidth(scripts.content), status.length);
     }
-    statuses.delete("temp-scripts");
+    statuses.delete("node-scripts");
     statuses.delete(CODE_ANCHOR_STATUS_KEY);
     assert.equal(segments.renderSegment("extension_statuses", context).visible, false);
     for (const width of [60, 100, 160]) assert.ok(tui.visibleWidth(rendered.content) <= width);
