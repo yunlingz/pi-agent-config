@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,7 +20,7 @@ assert(process.argv[2], "Usage: node verify-integration.ts <installed-pi-package
 const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(installation, "dist/index.js")).href);
 const { Type }: typeof import("typebox") = await import(pathToFileURL(createRequire(join(installation, "package.json")).resolve("typebox")).href);
 const ai: typeof import("@earendil-works/pi-ai") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-ai", installation)).href);
-const temporary = await mkdtemp(join(tmpdir(), "temp-scripts-integration-"));
+const temporary = await realpath(await mkdtemp(join(tmpdir(), "temp-scripts-integration-")));
 const previousStorage = process.env.PI_TEMP_SCRIPTS_DIR;
 process.env.PI_TEMP_SCRIPTS_DIR = join(temporary,"script-storage");
 let session: AgentSession | undefined;

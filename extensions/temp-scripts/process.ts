@@ -43,7 +43,11 @@ async function stopTree(child: ChildProcess, exited: () => boolean, processGroup
       killer.once("error", () => { clearTimeout(timer); accept(false); });
       killer.once("close", code => { clearTimeout(timer); accept(code === 0); });
     });
-    return outcome;
+    // The child can exit while taskkill enumerates its tree, or report exit after taskkill finishes.
+    if (!outcome) return exited();
+    const deadline = Date.now() + 2000;
+    while (!exited() && Date.now() < deadline) await delay(20);
+    return exited();
   }
   if (!groupExists(pid)) return true;
   try { process.kill(-pid, "SIGTERM"); } catch { /* Recheck the process group below. */ }

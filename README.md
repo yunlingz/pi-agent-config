@@ -48,17 +48,12 @@ Global npm package versions are pinned in `settings.json`; downloaded packages a
 - `pi-powerline-footer`: model, thinking, context, token, and Git information; `/powerline` controls the display. AI-generated vibes, automatic follow-up classification, and the welcome overlay are off. Git polling is branch-only. Powerline does not intercept `/compact`.
 - `@plannotator/pi-extension`: browser plan reviews, Markdown annotations, and code reviews; `/plannotator-plan-mode` controls plan mode.
 
-The local [auto-compact extension](extensions/auto-compact/README.md) requests Pi's native compaction before `/quit` and after 30 minutes of inactivity.
-It adds no custom summary instructions and does not change model selection, reasoning effort, retention, or output limits.
-Native compaction makes model requests and can incur latency and cost.
-Work guards, cancellation handling, and failure-before-quit safeguards remain active.
-Pi's native transcript view handles compacted sessions; saved session files remain intact.
-
-The local [parallel-compact extension](extensions/parallel-compact/README.md) runs history and split-turn prefix summaries concurrently.
-It reuses native prompts, merge logic, usage accounting, and retained boundaries.
-It forwards configured timeouts and provider retry limits, including trusted project overrides.
-It is not fully transparent: header hooks, retry events, failure classification, and checkpoint metadata differ from native compaction.
-Single-summary and virtual-model paths remain native. The provider must accept concurrent requests.
+The local [compact-quit extension](extensions/compact-quit/README.md) adds only `/compact-quit`.
+It waits for Pi's current agent work, requests native compaction, then exits after success or a native no-op.
+Failure or cancellation keeps Pi open. Ordinary `/quit` exits normally without requesting compaction.
+Idle time no longer triggers compaction. Native threshold checks, overflow recovery, and summary scheduling remain unchanged.
+The command does not change prompts, model selection, reasoning effort, token budgets, or saved settings.
+Compaction can incur model charges. Pi saves session history without compaction.
 
 The local [token-usage item](extensions/token-usage/README.md) replaces the separate cost and cache displays. It reports `in`, `cr`, `cw`, `out`, and the input-token cache percentage in one item. Counts start after the latest successful manual or automatic compaction and survive reload and resume. The four raw fields remain separate; this item does not use native `token_in` or `token_out`.
 
@@ -110,7 +105,7 @@ Each model has a configured context window of 1,050,000 tokens and a maximum out
 Independent web searches retain `low` effort without changing the main session's effort.
 Resumed sessions restore their saved model and effort; startup defaults do not replace session history.
 
-Automatic compaction is enabled. Native `compaction.modelOverrides` entries reserve 192,000 tokens for each of the three configured models: 128,000 for output plus 64,000 extra headroom below the approximately 922,000-token usable-input ceiling observed upstream. The nominal threshold is above 858,000 context tokens; native checks and overflow recovery still govern actual timing. For built-in compaction, recent-history retention remains at Pi's 20,000-token default. Other models retain the default 16,384-token reserve. Codex's 820,000-token trigger is not migrated. These are native configuration values, not auto-compact plugin overrides.
+Native automatic compaction is enabled. Native `compaction.modelOverrides` entries reserve 192,000 tokens for each of the three configured models: 128,000 for output plus 64,000 extra headroom below the approximately 922,000-token usable-input ceiling observed upstream. The nominal threshold is above 858,000 context tokens; native checks and overflow recovery still govern actual timing. For built-in compaction, recent-history retention remains at Pi's 20,000-token default. Other models retain the default 16,384-token reserve. Codex's 820,000-token trigger is not migrated. The compact-quit command does not override these native configuration values.
 
 On Pi 1.4.0, native summaries use the model's output limit.
 The reserve controls automatic compaction timing, not summary output length.
@@ -151,7 +146,7 @@ node extensions/temp-scripts/verify-tui.ts <installed-pi-package-directory> <exi
 ```
 
 Offline plugin tests use controlled responses and synthetic models. They need no service credentials or external model requests.
-They cover actual idle-to-parallel triggering, pre-quit ordering, failures, cancellation, single-summary delegation, usage, search controls, and rendering.
+They cover native compact-quit ordering, sequential summary requests, failures, cancellation, no-ops, usage, search controls, and rendering.
 The configuration verifier makes a real read-only request with the configured default model and global resources.
 
 Feature-specific live checks are optional and can incur model charges:
@@ -162,9 +157,9 @@ node scripts/verify-extensions.ts <installed-pi-package-directory> live [provide
 
 Live checks use Pi's configured default model, reasoning level, and authentication unless an exact model override is supplied.
 They do not substitute another model when a capability is unavailable.
-The combined compaction test covers auto-compact, parallel-compact, and token-usage.
+The compaction test covers compact-quit, native checkpoint persistence, token reset, session reopening, and continuation.
 The web-search test requires the configured search provider's API, allowlist, hosted search, and input-count capabilities.
-The compaction clock is simulated; these checks do not wait through real terminal inactivity or test every browser workflow.
+These checks use synthetic history; they do not test every terminal or browser workflow.
 MCP remains disabled and temporary state is removed after each check.
 
 ## Instructions and version control

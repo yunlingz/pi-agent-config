@@ -5,7 +5,10 @@ import { nativeBlockReason } from "./policy.ts";
 
 /** Recognize npm's Node shim without executing its shell program. Other batch files are unsupported. */
 export function nodeShimTarget(source: string): string | undefined {
-  const targets = [...source.matchAll(/"%(?:dp0%|~dp0)[\\/]([^"\r\n]+)"\s+%\*/giu)].map(match => match[1]).filter(value => value !== undefined);
+  const targets = [...source.matchAll(/"%(?:dp0%|~dp0)[\\/]([^"\r\n]+)"\s+%\*/giu)].map(match => match[1]);
+  for (const match of source.matchAll(/SET\s+"((?:NPM|NPX)_CLI_JS)=%~dp0[\\/]([^"%\r\n]+)"/giu)) {
+    if (new RegExp(`"%NODE_EXE%"\\s+"%${match[1]}%"\\s+%\\*`, "iu").test(source)) targets.push(match[2]);
+  }
   return targets.length > 0 && targets.every(value => value === targets[0]) ? targets[0] : undefined;
 }
 

@@ -77,10 +77,10 @@ node scripts/verify-extensions.ts <installed-pi-package-directory> offline
 Optional live compaction and usage checks use Pi's configured model and authentication:
 
 ```text
-node extensions/parallel-compact/verify-live.ts <installed-pi-package-directory> [provider/model]
+node extensions/compact-quit/verify-live.ts <installed-pi-package-directory> [provider/model]
 ```
 
-The combined verifier checks token reset after idle and pre-quit compaction, then real reported usage after continuation.
+The combined verifier checks token reset after native compact-quit, then real reported usage after reopening the session and continuing.
 The optional override uses an exact configured provider/model identifier. No provider, model, or token count is hard-coded.
 The selected provider must report usage. Missing usage causes a clear failure, not a model substitution.
 Live requests can incur charges. Deterministic totals and renderer behavior remain covered by offline tests.

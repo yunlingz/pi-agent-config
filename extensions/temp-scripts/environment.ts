@@ -1,4 +1,4 @@
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 /** Preserve inherited values. Windows treats environment names without case sensitivity. */
 export function executionEnvironment(inherited: NodeJS.ProcessEnv, binDirectories: readonly string[], platform = process.platform): NodeJS.ProcessEnv {
@@ -6,7 +6,7 @@ export function executionEnvironment(inherited: NodeJS.ProcessEnv, binDirectorie
   const windows = platform === "win32";
   const pathKeys = Object.keys(environment).filter(key => windows ? key.toLowerCase() === "path" : key === "PATH");
   const key = pathKeys[0] ?? "PATH";
-  const separator = windows ? ";" : delimiter;
+  const separator = windows ? ";" : ":";
   const current = environment[key] ?? "";
   const existing = new Set(current.split(separator).map(path => windows ? path.toLowerCase() : path));
   const prepend = binDirectories.filter(path => {

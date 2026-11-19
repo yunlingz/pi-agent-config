@@ -97,3 +97,14 @@ export function testUI(session: AgentSession, overrides: Partial<ExtensionUICont
   if (!runner) throw new Error("The integration session has no extension runner.");
   return { ...runner.getUIContext(), ...overrides };
 }
+
+export function testCommandActions(session: AgentSession) {
+  return {
+    waitForIdle: () => session.waitForIdle(),
+    reload: () => session.reload(),
+    newSession: unavailable,
+    fork: unavailable,
+    navigateTree: unavailable,
+    switchSession: unavailable,
+  };
+}

@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { runProcess } from "./process.ts";
 import { JOB_PREFIX, type JobManifest, type JobReference, type RunOptions, type RunResult, type RetentionResult } from "./types.ts";
 import { executionEnvironment } from "./environment.ts";
@@ -184,7 +183,7 @@ export async function executeJob(reference: JobReference, sessionId: string, ent
     options.onSource?.({ text: shown.toString("utf8"), path: target, truncated: shown.length !== sourceBytes.length });
     const cwd = await realpath(options.cwd);
     const record = { job: job.id, run, cwd, sourceHash, stdoutPath, stderrPath, artifacts };
-    const runtime = fileURLToPath(new URL("./runtime.ts", import.meta.url));
+    const runtime = new URL("./runtime.ts", import.meta.url).href;
     await writeFile(join(run, "request.json"), JSON.stringify({ ...record, entry, args, purpose: options.purpose, timeoutSeconds: options.timeoutSeconds, dependencies: job.dependencies, startedAt: Date.now() }, null, 2), { mode: 0o600 });
     const lockfile = join(job.root, "package-lock.json");
     if (existsSync(lockfile)) await copyFile(lockfile, join(run, "package-lock.json"));

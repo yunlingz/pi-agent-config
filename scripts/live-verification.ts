@@ -24,7 +24,6 @@ export async function createLiveSession(options: {
   extensionFactories?: ExtensionFactory[];
   appendSystemPrompt?: string[];
   includeBuiltinTools?: boolean;
-  load?: (operation: () => Promise<void>) => Promise<void>;
 }) {
   process.env.PI_OFFLINE = "1";
   process.env.PI_SKIP_VERSION_CHECK = "1";
@@ -53,8 +52,7 @@ export async function createLiveSession(options: {
     extensionFactories: options.extensionFactories,
     appendSystemPrompt: options.appendSystemPrompt ?? ["This is a read-only verification with synthetic history. Do not browse or change files. Do not use MCP."],
   });
-  if (options.load) await options.load(() => loader.reload());
-  else await loader.reload();
+  await loader.reload();
   assert.equal(loader.getExtensions().errors.length, 0, "The selected extensions must load without errors");
   let model;
   if (modelOverride) {

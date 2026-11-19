@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
@@ -17,7 +17,7 @@ assert.equal(modelOverride, undefined, "Managed-script acceptance must retain th
 const agentDirectory = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 const settings = await validateConfig(agentDirectory, packageDirectory);
 assertMcpDisabled(settings);
-const temporary = await mkdtemp(join(tmpdir(), "temp-scripts-live-"));
+const temporary = await realpath(await mkdtemp(join(tmpdir(), "temp-scripts-live-")));
 const previousStorage = process.env.PI_TEMP_SCRIPTS_DIR;
 process.env.PI_TEMP_SCRIPTS_DIR = join(temporary,"script-storage");
 let session: AgentSession | undefined;
@@ -218,13 +218,15 @@ try {
   assert((await results(interruptedJob)).some(value=>value.status==="cancelled"&&value.terminationConfirmed));
 
   const serviceTick=join(temporary,"live-service-tick.json");
-  await writeFile(join(temporary,"live-service.mjs"),`import {writeFileSync,renameSync} from "node:fs";let tick=0;setInterval(()=>{const path=${JSON.stringify(serviceTick)};writeFileSync(path+".next",JSON.stringify({pid:process.pid,tick:++tick}));renameSync(path+".next",path);},50);console.log("LIVE_SERVICE_STARTED");`);
-  await run("nonblocking background service", "Start the existing live-service.mjs with Node as a managed background service. Use script_inline, background service:true, and a five-second startup deadline. This worker has no HTTP endpoint; omit readiness URL. Keep it running for later queries; do not detach child processes manually.",["script_inline"]);
+  await writeFile(join(temporary, "live-service.mjs"), `import {appendFileSync} from "node:fs";let tick=0;setInterval(()=>{appendFileSync(${JSON.stringify(serviceTick)},JSON.stringify({pid:process.pid,tick:++tick})+"\\n");},50);console.log("LIVE_SERVICE_STARTED");`);
+  await run("nonblocking background service", "Start the existing live-service.mjs with Node as a managed background service. Use script_inline, background service:true, and a five-second startup deadline. This worker only writes a file and has no HTTP endpoint; omit readyUrl entirely. Keep it running for later queries; do not detach child processes manually.",["script_inline"]);
   const serviceJob=latest();
   const waitTick=async()=>{
     const deadline=Date.now()+5000;
     while(!existsSync(serviceTick)){assert(Date.now()<deadline,"Service did not start");await new Promise(accept=>setTimeout(accept,20));}
-    return JSON.parse(await readFile(serviceTick,"utf8")) as {pid:number;tick:number};
+    const line = (await readFile(serviceTick, "utf8")).split("\n").at(-2);
+    assert(line, "The heartbeat must contain a complete record");
+    return JSON.parse(line) as { pid: number; tick: number };
   };
   const beforeCompaction=await waitTick();
   await run("new query during background service","Reply with exactly QUERY_WHILE_RUNNING. Do not use tools.",[]);

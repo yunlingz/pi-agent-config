@@ -72,7 +72,7 @@ After a crash or new Pi process, persisted files and unresolved leases remain di
 
 ## Native command execution
 
-Managed helpers can import the optional runtime through `process.env.PI_SCRIPT_RUNTIME`:
+Managed helpers can import the optional runtime through the file URL in `process.env.PI_SCRIPT_RUNTIME`:
 
 ```js
 const { exec, progress } = await import(process.env.PI_SCRIPT_RUNTIME);
@@ -92,6 +92,8 @@ When a successful parent accepts a normal nonzero child exit, that exit alone do
 The command row still shows its actual failure status and accepted exit code.
 Timeouts, signals, incomplete evidence, truncation, and uncertain termination still prevent automatic cleanup.
 Results retain exit code, signal, status, elapsed time, output tail, and child-log paths.
+Windows can report self-termination as an ordinary nonzero exit with no signal. The runtime cannot recover an unreported cause.
+Explicit cancellation and deadlines retain their known status on every platform.
 No shell quoting or expansion applies to arguments.
 
 The runtime inherits Pi's environment without printing it. Pi's `bin` and job/project `node_modules/.bin` directories support tool discovery.
@@ -100,6 +102,7 @@ Child-specific overrides preserve other inherited values; Windows variable names
 Proxy and credential variables remain available to authorized programs, but are not copied into run metadata.
 
 Windows lookup considers `PATHEXT`. Recognized npm Node `.cmd` shims resolve to their Node entry point without CMD execution.
+Modern npm/npx shims use their adjacent CLI. Batch global-prefix redirection is not emulated.
 Arbitrary batch launchers and direct Bash, CMD, or PowerShell interpreters are rejected by the supported runtime API.
 Shell aliases, functions, profile initialization, and `bashSpawnHook`/`bashCommandPrefix` behavior are not emulated.
 Pi normally inherits shell configuration already established before startup.
@@ -131,6 +134,7 @@ A job contains editable `work/`, dependencies, and separate `runs/` records with
 New jobs live in private `~/.pi-temp-scripts/jobs/` directories, outside projects and the Pi configuration repository.
 On POSIX, the storage/job directories use mode `0700`; sensitive records and captured source use `0600`.
 `PI_TEMP_SCRIPTS_DIR` can select an isolated storage root, which the test verifiers use.
+The root must use its canonical path, not a link or Windows short-name alias. Test verifiers canonicalize their own temporary roots.
 Registered legacy `/tmp` jobs remain accessible to their owner; the extension never scans, migrates, or deletes them merely during upgrade.
 Snapshot execution leaves the editable workspace unchanged. `import.meta.url` identifies the snapshot.
 `PI_SCRIPT_WORK` identifies editable source; `PI_SCRIPT_ARTIFACTS` identifies run outputs.

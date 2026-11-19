@@ -157,8 +157,8 @@ export async function runForeground(reference: JobReference, sessionId: string, 
 function readinessUrl(value: string | undefined): URL | undefined {
   if (!value) return undefined;
   const url = new URL(value);
-  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password) {
-    throw new Error("Readiness requires a credential-free loopback HTTP URL");
+  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password || url.port === "0") {
+    throw new Error("Readiness requires a credential-free loopback HTTP URL with a nonzero port");
   }
   return url;
 }

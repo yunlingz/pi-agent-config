@@ -118,7 +118,7 @@ description: >
   - When real model requests are authorized, run the selected check:
 
     ```text
-    node extensions/parallel-compact/verify-live.ts <installed-pi-package-directory> [provider/model]
+    node extensions/compact-quit/verify-live.ts <installed-pi-package-directory> [provider/model]
     node extensions/web-search/verify-live.ts <installed-pi-package-directory> [provider/model]
     ```
 
@@ -126,7 +126,7 @@ description: >
   - During upgrades, preserve the configured provider, model, reasoning level, and authentication.
   - You must not use an override or fallback merely to obtain success.
 - **Coverage and capabilities**
-  - The compaction check covers auto-compact, parallel-compact, token reset, persistence, and continuation.
+  - The compaction check covers compact-quit, native checkpoint persistence, token reset, session reopening, and continuation.
   - The search check requires the selected model's configured search capabilities and allowlist entry.
   - When search is unavailable, you must not change models merely to pass that check.
 - **Unrun checks**

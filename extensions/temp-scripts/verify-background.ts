@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,13 +9,13 @@ import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { testUI } from "../../scripts/test-fixtures.ts";
 const BACKGROUND_WIDGET = "temp-scripts-background";
-import type { ExecutionDetails, JobReference } from "./types.ts";
+import type { ExecutionDetails, JobReference, RunResult } from "./types.ts";
 
 const installation = resolve(process.argv[2] ?? "");
 assert(process.argv[2],"Usage: node verify-background.ts <installed-pi-package-directory>");
 const sdk:typeof import("@earendil-works/pi-coding-agent")=await import(pathToFileURL(join(installation,"dist/index.js")).href);
 const ai:typeof import("@earendil-works/pi-ai")=await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-ai",installation)).href);
-const temporary=await mkdtemp(join(tmpdir(),"scripts-native-lifecycle-"));
+const temporary = await realpath(await mkdtemp(join(tmpdir(), "scripts-native-lifecycle-")));
 const previousStorage=process.env.PI_TEMP_SCRIPTS_DIR;
 process.env.PI_TEMP_SCRIPTS_DIR=join(temporary,"storage");
 let session:AgentSession|undefined;
@@ -72,8 +72,12 @@ try{
     return message;
   };
   const refs=()=>manager.getEntries().flatMap(entry=>entry.type==="custom"&&entry.customType==="temp-script-job"?[entry.data as JobReference]:[]);
-  const tickCode=(path:string)=>`import {writeFileSync,renameSync} from "node:fs"; let tick=0; const path=${JSON.stringify(path)}; function write(){writeFileSync(path+".next",JSON.stringify({pid:process.pid,tick:++tick}));renameSync(path+".next",path);} write();setInterval(write,30);console.log("SERVICE_STARTED");`;
-  const ticks=async(path:string)=>JSON.parse(await readFile(path,"utf8")) as {pid:number;tick:number};
+  const tickCode = (path: string) => `import {appendFileSync} from "node:fs";let tick=0;const path=${JSON.stringify(path)};function write(){appendFileSync(path,JSON.stringify({pid:process.pid,tick:++tick})+"\\n");}write();setInterval(write,30);console.log("SERVICE_STARTED");`;
+  const ticks = async (path: string) => {
+    const line = (await readFile(path, "utf8")).split("\n").at(-2);
+    assert(line, "The heartbeat must contain a complete record");
+    return JSON.parse(line) as { pid: number; tick: number };
+  };
   const inlineTick=join(temporary,"inline-tick.json");
   phase="nonblocking inline background service";
   const start=Date.now();
@@ -151,7 +155,18 @@ try{
   assert.throws(()=>process.kill(exitPid,0),/ESRCH/u);
   assert.deepEqual(errors,[]);
   assert(manager.getEntries().filter(entry=>entry.type==="compaction").length>=3);
-  console.log(`PASS: native manual/automatic compaction with no auto-compact/parallel-compact/CodeAnchor; nonblocking queries; foreground handoff; panel; cancellation independence; exact PID continuity; reload; logs/stop/release; session replacement; ${summaryRequests} recognized local summary requests`);
+  console.log(`PASS: native manual/automatic compaction with no other compaction or editing extensions; nonblocking queries; foreground handoff; panel; cancellation independence; exact PID continuity; reload; logs/stop/release; session replacement; ${summaryRequests} recognized local summary requests`);
+} catch (error) {
+  // These jobs contain only this verifier's synthetic source and output.
+  for (const root of owned) {
+    for (const run of await readdir(join(root, "runs")).catch(() => [])) {
+      const file = join(root, "runs", run, "result.json");
+      if (!existsSync(file)) continue;
+      const result = JSON.parse(await readFile(file, "utf8")) as RunResult;
+      console.error(JSON.stringify({ phase, status: result.status, exitCode: result.exitCode, output: result.output.slice(-2000) }));
+    }
+  }
+  throw error;
 }finally{
   clearInterval(heartbeat);
   globalThis.fetch=originalFetch;

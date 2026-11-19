@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
@@ -20,7 +20,7 @@ import { jobDirectory, storageRoot } from "./storage.ts";
 import { backgroundActive, backgroundStatus, forgetBackground, runForeground, startBackground, stopBackground, stopSessionBackground } from "./background.ts";
 
 const previousStorage = process.env.PI_TEMP_SCRIPTS_DIR;
-const testStorage = await mkdtemp(join(tmpdir(), "script-storage-test-"));
+const testStorage = await realpath(await mkdtemp(join(tmpdir(), "script-storage-test-")));
 process.env.PI_TEMP_SCRIPTS_DIR = testStorage;
 after(async () => {
   if (previousStorage === undefined) delete process.env.PI_TEMP_SCRIPTS_DIR;
@@ -120,6 +120,16 @@ test("inline JavaScript supports await and retained source without a compiler", 
   });
 });
 
+test("the runtime environment supplies an importable file URL", async () => {
+  await fixture(async job => {
+    const code = 'const specifier = process.env.PI_SCRIPT_RUNTIME; if (new URL(specifier).protocol !== "file:") throw new Error("Runtime must use a file URL"); const { progress } = await import(specifier); progress("URL_IMPORTED"); console.log("RUNTIME_URL_OK");';
+    await writeFile(join(job.root, "work", "main.mjs"), code);
+    const result = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: "Runtime URL", cwd: job.root, timeoutSeconds: 4 });
+    assert.equal(result.status, "succeeded", result.output);
+    assert.match(result.output, /RUNTIME_URL_OK/u);
+  });
+});
+
 test("source snapshots reject TypeScript, escaping entries, source links, and linked run directories", async () => {
   await fixture(async job => {
     const options = { purpose: "reject", cwd: job.root, timeoutSeconds: 5 };
@@ -200,6 +210,20 @@ test("abort and output limits are failures with preserved partial logs", async (
       stdoutPath: join(job.root, "limit-out"), stderrPath: join(job.root, "limit-err"), maxLogBytes: 1000 });
     assert.equal(limited.status, "output_limit");
     assert.equal((await readFile(join(job.root, "limit-out"))).length, 1000);
+  });
+});
+
+test("short-lived output-limited children confirm their actual exit", async () => {
+  for (let attempt = 0; attempt < 3; attempt++) await fixture(async job => {
+    const code = 'process.stdout.write("x".repeat(50000));';
+    const result = await runProcess({
+      command: process.execPath, args: ["-e", code], cwd: job.root, timeoutSeconds: 5,
+      stdoutPath: join(job.root, "limited-out"), stderrPath: join(job.root, "limited-err"), maxLogBytes: 1000,
+    });
+    assert.equal(result.status, "output_limit");
+    assert(result.terminationConfirmed);
+    assert.notEqual(result.exitCode, null, "The child exit event must arrive before completion");
+    assert.equal((await readFile(join(job.root, "limited-out"))).length, 1000);
   });
 });
 
@@ -294,6 +318,11 @@ test("Windows npm Node shim parsing rejects ambiguous and arbitrary batch conten
   assert.equal(nodeShimTarget('"%~dp0\\tool.js" %*\n'), "tool.js");
   assert.equal(nodeShimTarget('echo unsupported\n'), undefined);
   assert.equal(nodeShimTarget('"%dp0%\\a.js" %*\n"%dp0%\\b.js" %*'), undefined);
+  const modern = 'SET "NODE_EXE=%~dp0\\node.exe"\r\nSET "NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js"\r\n"%NODE_EXE%" "%NPM_CLI_JS%" %*\r\n';
+  assert.equal(nodeShimTarget(modern), "node_modules\\npm\\bin\\npm-cli.js");
+  assert.equal(nodeShimTarget(modern.replaceAll("NPM_CLI_JS", "NPX_CLI_JS").replaceAll("npm-cli.js", "npx-cli.js")), "node_modules\\npm\\bin\\npx-cli.js");
+  assert.equal(nodeShimTarget(modern.replaceAll('"%NODE_EXE%"', '"%OTHER_EXE%"')), undefined);
+  assert.equal(nodeShimTarget(modern + '"%~dp0\\other.js" %*'), undefined);
 });
 
 test("managed commands preserve literal arguments, stdin, spaced cwd, project bins, and child failure status", {skip:process.platform === "win32"}, async () => {
@@ -431,7 +460,7 @@ test("private stable storage rejects substituted roots and preserves registered 
   assert.equal(jobs,join(storageRoot(),"jobs"));
   if(process.platform!=="win32") assert.equal((await lstat(testStorage)).mode & 0o777,0o700);
   await fixture(async job=>{
-    assert.equal((await lstat(job.root)).mode & 0o077,0);
+    if (process.platform !== "win32") assert.equal((await lstat(job.root)).mode & 0o077, 0);
     const alias=`${testStorage}-link`;
     try{
       await symlink(testStorage,alias,process.platform==="win32"?"junction":"dir");
@@ -439,7 +468,7 @@ test("private stable storage rejects substituted roots and preserves registered 
       await assert.rejects(inspectJob(job,job.sessionId),/original directory/u);
     } finally {process.env.PI_TEMP_SCRIPTS_DIR=testStorage;await rm(alias,{force:true});}
   });
-  const root=await mkdtemp(join(tmpdir(),"pi-managed-script-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "pi-managed-script-")));
   const legacy:JobManifest={format:1,id:"legacy-fixture",root,token:"owned-fixture",sessionId:"legacy-session",purpose:"No automatic migration",createdAt:0,state:"released",dependencies:{}};
   try{
     await writeFile(join(root,"manifest.json"),JSON.stringify(legacy));
@@ -504,9 +533,15 @@ test("background startup validation and finite deadlines preserve failure record
     await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1}),/requires runtimeSeconds/u);
     await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1,service:true,runtimeSeconds:2}),/requires runtimeSeconds/u);
     await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1,service:true,readyUrl:"https://example.com"}),/loopback/u);
+    await assert.rejects(startBackground(job, job.sessionId, "main.mjs", [], "workspace", options, { startupSeconds: 1, service: true, readyUrl: "http://127.0.0.1:0/" }), /nonzero port/u);
+    assert(!existsSync(join(job.root, "lease")), "Invalid readiness must reject before starting a process");
     await startBackground(job,job.sessionId,"main.mjs",[],"workspace",options,{startupSeconds:1,runtimeSeconds:0.3});
-    await new Promise(accept=>setTimeout(accept,500));
-    const completed=await backgroundStatus(job,job.sessionId);
+    const deadline = Date.now() + 3000;
+    let completed = await backgroundStatus(job, job.sessionId);
+    while (completed?.status === "running" && Date.now() < deadline) {
+      await new Promise(accept => setTimeout(accept, 20));
+      completed = await backgroundStatus(job, job.sessionId);
+    }
     assert.equal(completed?.status,"timed_out");
     assert(completed?.record?.terminationConfirmed);
     forgetBackground(job.id);
@@ -581,7 +616,9 @@ test("accepted failures do not hide timeouts, unexpected failures, or failed par
   const cases = [
     { name: "caught unexpected exit", code: 'try { await exec(process.execPath,["-e","process.exitCode=2"],{timeoutSeconds:2}); } catch {}' },
     { name: "accepted child timeout", code: 'await exec(process.execPath,["-e","setInterval(()=>{},1000)"],{timeoutSeconds:0.1,allowFailure:true});' },
-    { name: "accepted child signal", code: `await exec(process.execPath,["-e","process.kill(process.pid,'SIGTERM')"],{timeoutSeconds:2,allowFailure:true});` },
+    { name: "accepted child cancellation", code: 'await exec(process.execPath,["-e","setInterval(()=>{},1000)"],{timeoutSeconds:2,signal:AbortSignal.timeout(100),allowFailure:true});' },
+    // Windows reports self-SIGTERM as exit 1 with no signal, indistinguishable from process.exit(1).
+    ...(process.platform === "win32" ? [] : [{ name: "accepted child signal", code: `await exec(process.execPath,["-e","process.kill(process.pid,'SIGTERM')"],{timeoutSeconds:2,allowFailure:true});` }]),
     { name: "failed parent", code: 'await exec(process.execPath,["-e","process.exitCode=2"],{timeoutSeconds:2,allowFailure:true});process.exitCode=3;' },
   ];
   for (const entry of cases) await fixture(async job => {

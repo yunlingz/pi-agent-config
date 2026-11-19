@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,7 +13,7 @@ import type { RunResult } from "./types.ts";
 const [installation, ptyDirectory, footerDirectory] = process.argv.slice(2);
 assert(installation && ptyDirectory && footerDirectory, "Usage: node verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>");
 const pty = createRequire(import.meta.url)(resolve(ptyDirectory)) as typeof import("node-pty");
-const temporary = await mkdtemp(join(tmpdir(), "temp-scripts-tui-"));
+const temporary = await realpath(await mkdtemp(join(tmpdir(), "temp-scripts-tui-")));
 let terminal: IPty | undefined;
 let exit: { exitCode: number } | undefined;
 let exited: Promise<void> | undefined;
@@ -214,3 +214,7 @@ try {
   assert(!existsSync(temporary));
   console.log("CLEANUP: terminal child and owned jobs removed");
 }
+
+// The Windows PTY driver can retain handles after its child exits and cleanup finishes.
+await new Promise<void>(accept => process.stdout.write("", () => accept()));
+process.exit(0);

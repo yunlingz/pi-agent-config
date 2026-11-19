@@ -13,17 +13,16 @@ assert.equal(readPackageInfo(join(packageDirectory, "package.json")).name, "@ear
 const agentDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checks = mode === "offline" ? [
   { name: "unit tests", args: ["--test",
-    "extensions/auto-compact/controller.test.ts", "extensions/token-usage/token-usage.test.ts",
+    "extensions/token-usage/token-usage.test.ts",
     "extensions/web-search/web-search.test.ts", "extensions/code-anchor/controls.test.ts",
     "extensions/code-anchor/file-tracking.test.ts", "extensions/temp-scripts/temp-scripts.test.ts",
     "extensions/code-anchor/wasm.test.ts", "extensions/code-anchor/reference-fixtures.test.ts",
-    "scripts/verification-data.test.ts", "scripts/compaction-fixtures.test.ts",
+    "scripts/verification-data.test.ts",
     "scripts/live-verification.test.ts", "skills/sync-pi-config/scripts/verify.test.ts"] },
-  ...["auto-compact/verify-integration.ts", "auto-compact/verify-summary-integration.ts",
-    "parallel-compact/verify.ts", "token-usage/verify-integration.ts", "web-search/verify-integration.ts",
+  ...["compact-quit/verify-integration.ts", "token-usage/verify-integration.ts", "web-search/verify-integration.ts",
     "code-anchor/verify-integration.ts", "temp-scripts/verify-integration.ts", "temp-scripts/verify-background.ts"]
     .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory] })),
-] : ["parallel-compact/verify-live.ts", "web-search/verify-live.ts"]
+] : ["compact-quit/verify-live.ts", "web-search/verify-live.ts"]
   .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory, ...(modelOverride ? [modelOverride] : [])] }));
 let child: ChildProcess | undefined;
 let phase = "starting";
