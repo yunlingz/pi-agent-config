@@ -10,7 +10,7 @@ import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { closeLiveSession, createLiveSession, parseLiveArguments } from "../../scripts/live-verification.ts";
 import { assertMcpDisabled, validateConfig } from "../../skills/sync-pi-config/scripts/verify.ts";
-import { ENTRY_TYPE, type JobReference, type RunResult, type ExecutionDetails } from "./types.ts";
+import { ENTRY_TYPE, JOB_EVENT_MESSAGE, type JobEvent, type JobReference, type RunResult, type ExecutionDetails } from "./types.ts";
 
 const { packageDirectory, modelOverride } = parseLiveArguments(process.argv.slice(2));
 assert.equal(modelOverride, undefined, "Managed-script acceptance must retain the configured model");
@@ -28,6 +28,7 @@ const owned = new Map<string, JobReference>();
 const events: AgentSessionEvent[] = [];
 const recordedRuns = new Map<string, RunResult>();
 const observedExecutions: ExecutionDetails[] = [];
+let conflictJob: JobReference | undefined;
 const heartbeat = setInterval(() => process.stderr.write(`[${new Date().toISOString()}] Managed scripts live: ${phase}; ${requests} requests, ${calls} tool calls\n`), 20_000);
 try {
   assert(settings.defaultProvider && settings.defaultModel);
@@ -42,7 +43,20 @@ try {
       "Do not inspect credentials, unrelated projects, or other temporary directories. Do not install anything except explicitly requested job dependencies.",
       "Some test phases intentionally request failed execution. Report the observed failure without retries unless requested.",
     ],
-    extensionFactories: [pi => { pi.on("before_provider_request", () => { requests++; }); }],
+    extensionFactories: [pi => {
+      pi.on("before_provider_request", () => { requests++; });
+      pi.registerTool({
+        name: "same_job_conflict_probe", label: "Synthetic conflict probe", description: "Run the pre-authorized deterministic same-job exclusion probe", defaultActive: false,
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute(_id, _input, signal, _update, ctx) {
+          assert(conflictJob, "The harness must authorize a synthetic job before this probe");
+          const args = { job: conflictJob.id, entry: "exclusive.mjs", purpose: "Synthetic same-job conflict", timeoutSeconds: 10 };
+          const outcomes = await Promise.all([ctx.executeTool("script_js", args, { signal }), ctx.executeTool("script_js", args, { signal })]);
+          assert.equal(outcomes.filter(value => value.isError).length, 1);
+          return { content: [{ type: "text", text: "Exactly one workspace run succeeded and the duplicate rejected." }], details: undefined };
+        },
+      });
+    }],
   });
   session = live.session;
   const errors: unknown[] = [];
@@ -113,6 +127,48 @@ try {
     }
     return output;
   };
+  const monitor = async (label: string, prompt: string, reference: JobReference, action: "status" | "logs", status: ExecutionDetails["status"]) => {
+    const jobsBefore = owned.size;
+    const turn = await run(label, prompt, ["script_job"]);
+    const starts = turn.flatMap(event => event.type === "tool_execution_start" ? [event] : []);
+    assert.equal(starts.length, 1, "A single snapshot must not create helpers, read job files, or repeatedly poll");
+    assert.equal(starts[0].toolName, "script_job");
+    // The selected tool owns these validated arguments and result details.
+    const input = starts[0].args as { action: string; job: string };
+    assert.equal(input.action, action);
+    assert.equal(input.job, reference.id);
+    const completed = turn.find(event => event.type === "tool_execution_end" && event.toolName === "script_job");
+    assert(completed?.type === "tool_execution_end");
+    const details = completed.result.details as ExecutionDetails;
+    assert.equal(details.status, status);
+    assert.equal(owned.size, jobsBefore, "Routine monitoring must not create another managed job");
+    return details;
+  };
+  const concurrencySource = `import {existsSync,writeFileSync} from "node:fs";
+import {join} from "node:path";
+const [label,peer,phase]=process.argv.slice(2);
+const path=name=>join(${JSON.stringify(temporary)},phase+"-"+name+".json");
+writeFileSync(path(label+"-start"),JSON.stringify({pid:process.pid,time:Date.now()}));
+const deadline=Date.now()+6000;
+while(!existsSync(path(peer+"-start"))){if(Date.now()>deadline)throw new Error("Sibling did not start concurrently");await new Promise(r=>setTimeout(r,20));}
+await new Promise(r=>setTimeout(r,750));
+writeFileSync(path(label+"-end"),JSON.stringify({pid:process.pid,time:Date.now()}));
+console.log("CONCURRENT_OK",label);`;
+  const concurrencyPath = join(temporary, "concurrency.mjs");
+  await writeFile(concurrencyPath, concurrencySource);
+  const assertOverlap = async (label: string, turn: AgentSessionEvent[], names: string[]) => {
+    assert(turn.some(event => event.type === "message_end" && event.message.role === "assistant"
+      && event.message.content.filter(block => block.type === "toolCall" && names.includes(block.name)).length >= 2), "The model must submit sibling calls in one assistant message");
+    const records = await Promise.all(["a", "b"].map(async name => {
+      // Only the synthetic concurrency worker writes these timing records.
+      const start = JSON.parse(await readFile(join(temporary, `${label}-${name}-start.json`), "utf8")) as { pid: number; time: number };
+      const end = JSON.parse(await readFile(join(temporary, `${label}-${name}-end.json`), "utf8")) as typeof start;
+      return { start, end };
+    }));
+    assert.notEqual(records[0].start.pid, records[1].start.pid);
+    assert(Math.max(...records.map(value => value.start.time)) < Math.min(...records.map(value => value.end.time)), "Actual process lifetimes must overlap");
+    for (const { start } of records) assert.throws(() => process.kill(start.pid, 0), /ESRCH/u);
+  };
   console.log(`START: managed-script acceptance on ${model.provider}/${model.id}; reasoning ${reasoning}; real requests and approved registry downloads can incur charges`);
   for(const name of ["ls","find","grep"]) assert(session.getActiveToolNames().includes(name),`Missing configured dedicated tool ${name}`);
   await writeFile(join(temporary,"dedicated-tool.txt"),"DEDICATED_TOOL_MARKER\n");
@@ -129,6 +185,11 @@ try {
   assert.equal(accepted?.retention?.state, "removed");
   assert(accepted.commands.some(command => command.status === "failed" && command.exitCode === 1 && command.failureAccepted));
   assert(!existsSync(latest().root));
+  const inlineConcurrency = await run("concurrent foreground inline jobs", "Execute the existing concurrency.mjs twice with Node, using two separate foreground script_inline calls in the same assistant message. Pass a,b,inline to the first worker and b,a,inline to the second. Use managed exec with separate argument arrays and a ten-second child deadline. Set each total deadline to 15 seconds. The workers wait for each other, so do not await one tool result before issuing the other. Do not combine them inside one helper, use background, or keep:true.", ["script_inline"]);
+  await assertOverlap("inline", inlineConcurrency, ["script_inline"]);
+  const inlineOutcomes = inlineConcurrency.flatMap(event => event.type === "tool_execution_end" && event.toolName === "script_inline" ? [event.result.details as ExecutionDetails] : []);
+  assert.equal(inlineOutcomes.length, 2);
+  assert(inlineOutcomes.every(value => value.retention?.state === "removed" && value.record?.terminationConfirmed));
   if (process.platform !== "win32") {
     await mkdir(join(temporary,"node_modules",".bin"),{recursive:true});
     await symlink(process.execPath,join(temporary,"node_modules",".bin","project-path-fixture"));
@@ -150,6 +211,16 @@ try {
   const kept = latest();
   assert(existsSync(kept.root));
   assert.equal(observedExecutions.at(-1)?.retention?.state,"retained");
+  const keptBefore = (await results(kept)).length;
+  const jobsBeforeReuse = owned.size;
+  await run("reuse retained inline source", `Use script_js to rerun the saved main.mjs in retained job ${kept.id}. Set purpose to exactly Reuse retained inline source and use a five-second deadline. Do not create another job or edit its source.`, ["script_js"]);
+  assert.equal(owned.size, jobsBeforeReuse);
+  assert.equal((await results(kept)).length, keptBefore + 1);
+  const reused = JSON.parse(await readFile(join(kept.root, "manifest.json"), "utf8")) as { purpose: string; lastRunPurpose: string };
+  assert.equal(reused.purpose, kept.purpose);
+  assert.equal(reused.lastRunPurpose, "Reuse retained inline source");
+  await session.reload();
+  assert.equal((JSON.parse(await readFile(join(kept.root, "manifest.json"), "utf8")) as typeof reused).lastRunPurpose, reused.lastRunPurpose);
   await run("inline artifact retention", "Run one inline JavaScript helper that writes artifact.txt containing ARTIFACT_OK under PI_SCRIPT_ARTIFACTS. Do not set keep:true. Report its path.",["script_inline"]);
   assert(existsSync(latest().root));
   assert((await results(latest())).some(value=>existsSync(join(value.artifacts,"artifact.txt"))));
@@ -157,6 +228,51 @@ try {
   const job = latest();
   const work = join(job.root, "work");
   assert((await results(job)).some(value => value.status === "succeeded" && value.output.includes("before:42")));
+  await writeFile(join(work, "lifecycle.mjs"), 'const {progress}=await import(process.env.PI_SCRIPT_RUNTIME);progress("LIFECYCLE_STARTED");await new Promise(r=>setTimeout(r,10000));progress("LIFECYCLE_PROGRESS");await new Promise(r=>setTimeout(r,3000));console.log("LIFECYCLE_FINAL");');
+  const lifecycleOffset = events.length;
+  const pushed = () => events.slice(lifecycleOffset).flatMap(event => {
+    if (event.type !== "message_end" || event.message.role !== "custom" || event.message.customType !== JOB_EVENT_MESSAGE) return [];
+    return (event.message.details as { events: JobEvent[] }).events.filter(value => value.job === job.id);
+  });
+  await run("event-driven background lifecycle", `Run lifecycle.mjs once in job ${job.id} using script_js with background {runtimeSeconds:30,readyUrl:""} and a five-second startup deadline. The empty readyUrl means no readiness check; this worker has no HTTP endpoint. Use test:false and keep its source unchanged. Acknowledge startup briefly. When pushed progress arrives, acknowledge it without tools. When the pushed final result arrives, reply with exactly LIFECYCLE_FINAL. Do not poll, read job files, sleep, create a monitor, or release this workspace.`, ["script_js"]);
+  phase = "waiting for pushed lifecycle progress and final result";
+  let eventTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopEventWatch = () => {};
+  try {
+    await new Promise<void>((accept, reject) => {
+      const check = () => { if (pushed().some(value => value.kind === "state" && value.status === "succeeded")) accept(); };
+      stopEventWatch = live.session.subscribe(check);
+      eventTimer = setTimeout(() => reject(new Error("No pushed final lifecycle result")), 60000);
+      check();
+    });
+    await session.waitForIdle();
+    refresh();
+    assert(pushed().some(value => value.status === "preparing"));
+    assert(pushed().some(value => value.status === "running"));
+    assert(pushed().some(value => value.message === "LIFECYCLE_PROGRESS"));
+    assert.equal(pushed().filter(value => value.kind === "state" && value.status === "succeeded").length, 1);
+    assert.equal(session.getLastAssistantText()?.trim(), "LIFECYCLE_FINAL");
+    const lifecycleTools = events.slice(lifecycleOffset).flatMap(event => event.type === "tool_execution_start" ? [event.toolName] : []);
+    assert.deepEqual(lifecycleTools, ["script_js"], "Lifecycle reporting must not require polling tools or helper jobs");
+    console.log("PASS: live proactive startup/progress/final callbacks; automatic continuation; no polling tools or helper jobs");
+  } finally { clearTimeout(eventTimer); stopEventWatch(); }
+  await writeFile(join(work, "concurrency.mjs"), concurrencySource);
+  const mixedConcurrency = await run("concurrent inline workspace and inspection", `Submit three sibling calls in one assistant message. First, run concurrency.mjs in workspace job ${job.id} using foreground script_js with args a,b,mixed. Second, use a foreground script_inline helper and managed exec to run ${concurrencyPath} with Node and args b,a,mixed. Third, inspect job ${job.id} using script_job. Use 15-second total execution deadlines and a ten-second child deadline. These workers need to overlap. Do not use background or combine them into one helper.`, ["script_inline", "script_js", "script_job"]);
+  await assertOverlap("mixed", mixedConcurrency, ["script_inline", "script_js"]);
+  await writeFile(join(work, "exclusive.mjs"), 'console.log("EXCLUSIVE_STARTED",process.pid);await new Promise(r=>setTimeout(r,2000));console.log("EXCLUSIVE_FINISHED");');
+  const exclusiveBefore = new Set((await results(job)).map(value => value.run));
+  conflictJob = job;
+  session.setActiveToolsByName([...session.getActiveToolNames(), "same_job_conflict_probe"]);
+  const exclusiveTurn = await run("same-job concurrent rejection", "Call same_job_conflict_probe exactly once. The harness authorizes this synthetic regression. It must report one successful run and one rejected duplicate. Do not invoke script_js directly, retry, create jobs, or release anything.", ["same_job_conflict_probe", "script_js"], ["script_js"]);
+  session.setActiveToolsByName(session.getActiveToolNames().filter(name => name !== "same_job_conflict_probe"));
+  conflictJob = undefined;
+  const exclusiveOutcomes = exclusiveTurn.flatMap(event => event.type === "tool_execution_end" && event.toolName === "script_js" ? [event] : []);
+  assert.equal(exclusiveOutcomes.length, 2);
+  assert.equal(exclusiveOutcomes.filter(event => event.isError).length, 1);
+  const exclusiveAfter = await results(job);
+  assert.equal(exclusiveAfter.length, exclusiveBefore.size + 1);
+  const exclusiveRun = exclusiveAfter.find(value => !exclusiveBefore.has(value.run));
+  assert(exclusiveRun?.output.includes("EXCLUSIVE_FINISHED") && exclusiveRun.status === "succeeded" && exclusiveRun.terminationConfirmed);
   await run("CodeAnchor hashline correction and rerun", `Read ${join(work, "format.mjs")}, then use hashline edit to change the prefix before: to after:. Preserve all other source. Update the test through normal file tools if needed. Run main.mjs and its tests again in job ${job.id}.`, ["read", "edit", "script_js"]);
   assert((await results(job)).some(value => value.output.includes("after:42")));
   await run("AST preview and application", `Use ast_grep to find console.log($VALUE) in ${join(work, "main.mjs")}. Use ast_edit to stage console.log($VALUE) -> console.info($VALUE), review it, then apply through write xd://resolve. Rerun main.mjs in job ${job.id}.`, ["ast_grep", "ast_edit", "write", "script_js"]);
@@ -198,24 +314,32 @@ try {
   assert((await results(latest())).some(value => value.status === "timed_out" && value.terminationConfirmed));
   phase = "cancelling an actual live-selected script";
   let requestedAbort = false;
+  const interruptedCalls = new Set<string>();
+  const interruptedOffset = new Set(owned.keys());
   const unsubscribe = session.subscribe(event => {
-    if (event.type === "tool_execution_update" && event.toolName === "script_inline" && (event.partialResult as {details?:ExecutionDetails}).details?.status === "running" && !requestedAbort) {
-      requestedAbort = true;
-      setTimeout(() => { void live.session.abort(); }, 150);
+    if (event.type === "tool_execution_update" && event.toolName === "script_inline"
+      && (event.partialResult as { details?: ExecutionDetails }).details?.output.includes("WAITING_INTERRUPTION")) {
+      interruptedCalls.add(event.toolCallId);
+      if (interruptedCalls.size === 2 && !requestedAbort) {
+        requestedAbort = true;
+        setTimeout(() => { void live.session.abort(); }, 150);
+      }
     }
   });
   const abortTimer = setTimeout(() => { void live.session.abort(); }, 120_000);
   try {
-    await session.prompt("Run one inline JavaScript helper that prints WAITING_INTERRUPTION, then waits 30 seconds. Give it a 40-second deadline. The harness will interrupt waiting; the job must continue until explicitly stopped. Do not retry.");
+    await session.prompt("Submit two separate foreground script_inline calls in the same assistant message. Each must print WAITING_INTERRUPTION and its PID, then wait 30 seconds. Give each a 40-second deadline. Do not combine them, use background, or await one before issuing the other. The harness will interrupt waiting after both actual processes print. Both jobs must continue until explicitly stopped. Do not retry.");
     await session.waitForIdle();
     refresh();
     assert(requestedAbort);
-    assert(existsSync(join(latest().root,"lease")),"Interrupted foreground process must continue");
-    console.log("PASS: live interruption released the agent while its owned foreground job continued");
+    const interruptedJobs = [...owned.values()].filter(reference => !interruptedOffset.has(reference.id));
+    assert.equal(interruptedJobs.length, 2);
+    assert(interruptedJobs.every(reference => existsSync(join(reference.root, "lease"))), "Both interrupted foreground processes must continue");
+    console.log("PASS: live interruption released both waits while their owned foreground processes continued");
   } finally { clearTimeout(abortTimer); unsubscribe(); }
-  const interruptedJob=latest();
-  await run("stop interrupted foreground job",`Stop job ${interruptedJob.id} using script_job stop. Do not release it yet.`,["script_job"]);
-  assert((await results(interruptedJob)).some(value=>value.status==="cancelled"&&value.terminationConfirmed));
+  const interruptedJobs = [...owned.values()].filter(reference => !interruptedOffset.has(reference.id));
+  await run("stop interrupted foreground jobs", `Stop both jobs ${interruptedJobs.map(reference => reference.id).join(" and ")} using separate script_job stop calls in the same assistant message. Do not release them yet.`, ["script_job"]);
+  for (const reference of interruptedJobs) assert((await results(reference)).some(value => value.status === "cancelled" && value.terminationConfirmed));
 
   const serviceTick=join(temporary,"live-service-tick.json");
   await writeFile(join(temporary, "live-service.mjs"), `import {appendFileSync} from "node:fs";let tick=0;setInterval(()=>{appendFileSync(${JSON.stringify(serviceTick)},JSON.stringify({pid:process.pid,tick:++tick})+"\\n");},50);console.log("LIVE_SERVICE_STARTED");`);
@@ -229,6 +353,9 @@ try {
     return JSON.parse(line) as { pid: number; tick: number };
   };
   const beforeCompaction=await waitTick();
+  await monitor("natural running-job status", `Has managed job ${serviceJob.id} finished yet? Check once and report its current state. Leave it running.`, serviceJob, "status", "running");
+  const recent = await monitor("natural running-job output", `What has managed job ${serviceJob.id} printed most recently? Take one snapshot and leave it running.`, serviceJob, "logs", "running");
+  assert(recent.output.includes("LIVE_SERVICE_STARTED"));
   await run("new query during background service","Reply with exactly QUERY_WHILE_RUNNING. Do not use tools.",[]);
   assert.equal(session.getLastAssistantText()?.trim(),"QUERY_WHILE_RUNNING");
   phase="native real-provider manual compaction with an active service";
@@ -246,6 +373,7 @@ try {
   await run("background logs after native compaction and reload",`Use script_job logs for job ${serviceJob.id}. Confirm LIVE_SERVICE_STARTED without stopping it.`,["script_job"]);
   await run("explicit service shutdown",`Stop background job ${serviceJob.id} using script_job stop. Preserve its logs until final release.`,["script_job"]);
   assert((await results(serviceJob)).some(value=>value.status==="cancelled"&&value.terminationConfirmed));
+  await monitor("natural stopped-job completion", `Has managed job ${serviceJob.id} finished now, and how did it stop? Check once and report. Preserve its records.`, serviceJob, "status", "cancelled");
   const reservation = createServer();
   await new Promise<void>((accept, reject) => {
     reservation.once("error", reject);
@@ -283,12 +411,12 @@ try {
   assert.equal(errors.length, 0);
   console.log(`PASS: real-provider selection; commands/startup/tests; authoring; dependencies; shell gates; output/deadlines; interruption; services/readiness; native compaction/reload; release/cleanup; ${requests} requests, ${calls} tool calls`);
 } catch (error) {
-  if (phase.includes("background") || phase.includes("service")) {
+  if (phase.includes("background") || phase.includes("service") || phase.includes("workspace")) {
     // These sources use synthetic fixtures only. Provider diagnostics remain private.
     const backgroundCalls = events.flatMap(event => {
-      if (event.type !== "tool_execution_start" || event.toolName !== "script_inline") return [];
-      const input = event.args as { background?: object | false; timeoutSeconds?: number; code?: string };
-      return input.background ? [{ background: input.background, timeoutSeconds: input.timeoutSeconds, source: input.code }] : [];
+      if (event.type !== "tool_execution_start" || !["script_inline", "script_js"].includes(event.toolName)) return [];
+      const input = event.args as { background?: object | false; timeoutSeconds?: number; code?: string; entry?: string };
+      return input.background ? [{ tool: event.toolName, background: input.background, timeoutSeconds: input.timeoutSeconds, source: input.code, entry: input.entry }] : [];
     });
     const toolErrors = events.flatMap(event => {
       if (event.type !== "tool_execution_end" || !event.isError) return [];

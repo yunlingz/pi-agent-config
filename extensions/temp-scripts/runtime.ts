@@ -27,7 +27,9 @@ export async function exec(command: string, args: string[], options: { timeoutSe
   const result = await runProcess({ command: invocation.command, args: invocation.args, cwd, timeoutSeconds: options.timeoutSeconds, signal: options.signal,
     env, stdin: options.input, untilStopped: options.timeoutSeconds === undefined && process.env.PI_SCRIPT_BACKGROUND === "1",
     stdoutPath: join(directory, "stdout.log"), stderrPath: join(directory, "stderr.log"), processGroup: false,
-    onProgress: update => progress(`${command}: ${Math.floor(update.elapsedMs / 1000)}s; ${update.outputBytes} output bytes`),
+    onProgress: update => {
+      if (process.send && process.connected) process.send({ type: "command_progress", message: `${command}: ${Math.floor(update.elapsedMs / 1000)}s; ${update.outputBytes} output bytes` }, () => {});
+    },
     onSpawn: () => report({ ...event, status: "running" }),
     onOutput: (chunk, stream) => new Promise<void>((accept, reject) => {
       process[stream].write(chunk, error => { if (error) reject(error); else accept(); });

@@ -13,6 +13,24 @@ export interface CommandEvent {
   truncated?: boolean;
   failureAccepted?: boolean;
 }
+export type ProcessEvent = { kind: "progress"; message: string } | { kind: "command"; command: CommandEvent };
+
+export interface JobEvent {
+  job: string;
+  run: string;
+  purpose: string;
+  sequence: number;
+  timestamp: number;
+  kind: "state" | "readiness" | "handoff" | "progress" | "command";
+  status: ExecutionDetails["status"] | "waiting" | "ready" | "background" | "stopping";
+  message?: string;
+  command?: Pick<CommandEvent, "id" | "command" | "status" | "exitCode">;
+  output?: string;
+  exitCode?: number | null;
+  terminationConfirmed?: boolean;
+}
+
+export const JOB_EVENT_MESSAGE = "temp-script-events";
 
 export interface SourceView {
   text: string;
@@ -69,6 +87,7 @@ export interface JobManifest extends JobReference {
   format: 1;
   sessionId: string;
   purpose: string;
+  lastRunPurpose?: string;
   createdAt: number;
   state: "open" | "pinned" | "released";
   dependencies: Record<string, string>;
@@ -117,8 +136,10 @@ export interface RunOptions {
   timeoutSeconds: number;
   signal?: AbortSignal;
   onProgress?: (progress: Progress) => void;
+  onEvent?: (event: ProcessEvent) => void;
   onSource?: (source: SourceView) => void;
   env?: NodeJS.ProcessEnv;
   untilStopped?: boolean;
+  background?: boolean;
   onSpawn?: () => void;
 }

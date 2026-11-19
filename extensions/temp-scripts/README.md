@@ -18,6 +18,8 @@ Temporary helpers are JavaScript-only. Maintained extension code remains TypeScr
 Inline submission does not mean a workspace script: Node reads the submitted code through stdin.
 Supporting source/log files can exist during execution, but safe successful inline calls remove them before returning.
 Several sequential commands alone do not require a workspace.
+`Inline JS` and `Workspace JS` describe execution methods, not permanent job types.
+A retained inline job can be rerun through `script_js` using its saved `work/main.mjs`; this reuses the same job.
 Dedicated session tools remain preferred and unchanged; this extension replaces shell execution, not normal file/search tools.
 
 `/temp-scripts` toggles the extension. Explicit forms are `/temp-scripts on`, `/temp-scripts off`, and `/temp-scripts status`.
@@ -29,6 +31,19 @@ When enabled, all agent-issued `bash` and `powershell` calls are blocked, includ
 File/search tools remain unchanged. Manual `!` commands and Pi's internal clipboard operations remain outside these gates.
 When disabled, managed tools and their guidance leave the active tool set, shell gates stop, and retained files remain intact.
 No unavailable native tool is silently enabled.
+
+## Concurrent execution
+
+Independent calls can run concurrently in Pi's normal parallel tool mode, including foreground calls.
+Foreground execution waits for completion; it does not impose a session-wide execution lock.
+Each inline call has its own job, process, output stream, deadline, and cleanup decision.
+Workspace runs and lifecycle mutations retain per-job leases. A conflicting operation on an active job rejects instead of queuing.
+Job inspection does not force unrelated work to wait. Independent jobs can finish in any order.
+Dependent steps, source edits, dependency changes, and shared-file mutations must stay in order.
+Separate jobs do not lock shared project files or external services. An explicitly sequential Pi mode still takes precedence.
+Explicit background execution remains separate; concurrency does not require background jobs.
+New messages can enter Pi's native steering queue during foreground execution, but the model processes them after the batch returns.
+Long independent work needs explicit background execution when later messages must be processed before completion.
 
 ## Ordinary file authoring
 
@@ -45,10 +60,14 @@ Finite jobs use `background: { runtimeSeconds: 3600 }`; requested services use `
 For background execution, `timeoutSeconds` is a bounded startup deadline of at most 120 seconds.
 The start call returns promptly; the agent can settle and accept later queries while the process runs.
 An optional loopback HTTP `readyUrl` checks application readiness. Without it, running does not prove readiness.
+Omitting `readyUrl` or setting it to an empty string disables readiness checks; a nonempty URL must identify a real endpoint.
 
 The fixed background panel displays compact tree rows with job names, state markers, elapsed time, and recent output.
 Its layout follows Todo's visual conventions without importing Todo or sharing its state.
 The retention panel adds each job at startup, keeps stored jobs visible, and removes entries after successful cleanup or release.
+The retention row shows the latest accepted run purpose and restores that label after reload.
+Inspection keeps the original workspace purpose and exposes the latest run purpose separately.
+A rejected duplicate does not replace the active run's label or state.
 With standard global loading, both panels stay above Powerline through redraw and reload.
 Empty panels render no lines. Reserved startup slots preserve their position; refreshes do not reinsert widgets.
 `/script-jobs expand` and Pi's tool-output expansion reveal IDs, retention reasons, readiness details, and more output.
@@ -69,6 +88,29 @@ Interactive programs remain unsupported; background services need no terminal in
 
 Controllers are extension-owned process state, not saved PIDs to kill after restart.
 After a crash or new Pi process, persisted files and unresolved leases remain diagnostic evidence; no automatic restart or PID-based kill occurs.
+
+## Event-driven job reports
+
+Background and interrupted jobs push lifecycle events through Pi's native custom follow-up messages.
+The events cover preparation, process start, readiness changes, background handoff, child-command starts/exits, explicit progress, stopping, and final outcomes.
+Final outcomes include success, failure, cancellation, timeout, output limits, and uncertain termination.
+Ordinary foreground calls stream their state and return their result without duplicate callback messages.
+Startup failures return through the original tool call rather than create a second agent turn.
+
+Events can resume an idle agent and incur model charges. Busy agents receive events through Pi's normal follow-up queue.
+The bridge pauses during compaction, reconnects after reload, and suppresses callbacks during quit or session replacement.
+It does not invent user messages, restart jobs, authorize retries, or recover processes after Pi exits.
+Runs started before this reporting feature was loaded keep their original reporting behavior and remain stoppable after reload.
+
+The inbox batches bursts, keeps at most 64 pending events, and allows only one callback message to wait in Pi's queue.
+Repeated progress is coalesced; overflow reports an omitted count. Each run has an event ID and ordered sequence numbers.
+Event messages omit command arguments and bound included output. Scripts must not emit credentials.
+Raw stdout/stderr and elapsed-time heartbeats update the UI without creating model callbacks.
+Explicit `progress(message)` reports useful milestones; automatic native-command heartbeats stay UI-only.
+Batching uses a one-shot timer after an event, not periodic job or file polling.
+
+`script_job status` and `logs` remain available for requested manual snapshots and diagnosis.
+Routine continuation does not require polling tools, wait helpers, internal-file reads, or sleep loops.
 
 ## Native command execution
 
@@ -180,19 +222,23 @@ Commands run from the global agent directory:
 node --test extensions/temp-scripts/temp-scripts.test.ts
 node extensions/temp-scripts/verify-integration.ts <installed-pi-package-directory>
 node extensions/temp-scripts/verify-background.ts <installed-pi-package-directory>
+node extensions/temp-scripts/verify-events.ts <installed-pi-package-directory>
 node extensions/temp-scripts/verify-live.ts <installed-pi-package-directory>
 node extensions/temp-scripts/verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>
 ```
 
-The shared offline workflow includes unit, authoring, and native background/compaction integration tests.
+The shared offline workflow includes unit, authoring, concurrency, and native background/compaction integration tests.
+Concurrency checks use actual sibling Pi calls and process barriers, not elapsed-time estimates alone.
+They cover inline/workspace overlap, mixed job actions, same-job rejection, interruption, independent stop, shutdown, and cleanup.
 The native lifecycle verifier loads only this extension; it needs no CodeAnchor or automatic/parallel compaction extension.
 The live verifier uses configured defaults and normal authentication; it makes real provider requests and approved registry downloads.
-It covers dedicated-tool selection, commands, PATH/stdin/environment, startup/tests, authoring, retention, dependencies, output, interruption, services, HTTP readiness, native compaction, reload, and cleanup.
+It also checks real-model sibling calls, overlapping process lifetimes, same-job rejection, and two-job interruption.
+Other coverage includes dedicated-tool selection, commands, PATH/stdin/environment, startup/tests, authoring, retention, dependencies, output, services, HTTP readiness, native compaction, reload, and cleanup.
 The terminal verifier uses an existing `node-pty` installation only as a test driver.
 
-Runtime verification currently covers Debian WSL, installed Pi 1.5.1, and Node.js 26.13.1.
-Strict checking uses Node.js 22 declarations. Node.js 22 execution, native Windows execution, and macOS execution were unavailable.
-Windows environment/shim parsing has fixture coverage, not native runtime acceptance.
+Windows acceptance uses installed Pi 1.5.1 and Node.js 24.22.1, including actual terminal and configured-model checks.
+Earlier acceptance covered Debian WSL with Pi 1.5.1 and Node.js 26.13.1.
+Strict checking uses Node.js 22 declarations. The concurrency change has not been executed on Node.js 22, WSL, or macOS.
 
 ## Limits
 

@@ -72,16 +72,33 @@ try {
     return (await traces()).findLast(value => value.event === "checkpoint");
   };
   await wait("default-on Powerline status", () => /scripts:\s*on/u.test(visible()));
+  child.write("Run concurrent foreground fixtures.\r");
+  await wait("both foreground rows running together", () => /Concurrent a \(running\)/u.test(visible()) && /Concurrent b \(running\)/u.test(visible()));
+  await wait("both real workers reach their shared barrier", () => existsSync(join(workspace, "parallel-a")) && existsSync(join(workspace, "parallel-b")));
+  child.write("An unrelated queued query.\r");
+  await wait("native foreground steering queue", () => /Steering:.*unrelated queued/u.test(visible()));
+  assert(!(await traces()).some(value => value.event === "unrelated_query"), "The foreground batch must finish before the model processes steering");
+  await wait("concurrent foreground terminal calls settle", async () => (await traces()).some(value => value.event === "settled"));
+  const parallelStarts = await Promise.all(["a", "b"].map(async label => JSON.parse(await readFile(join(workspace, `parallel-${label}`), "utf8")) as { pid: number; start: number }));
+  const parallelEnds = await Promise.all(["a", "b"].map(async label => Number(await readFile(join(workspace, `parallel-${label}-end`), "utf8"))));
+  assert.notEqual(parallelStarts[0].pid, parallelStarts[1].pid);
+  assert(Math.max(...parallelStarts.map(value => value.start)) < Math.min(...parallelEnds));
+  const queuedQuery = (await traces()).find(value => value.event === "unrelated_query");
+  assert(queuedQuery?.time && queuedQuery.time >= Math.max(...parallelEnds));
+  for (const value of parallelStarts) assert.throws(() => process.kill(value.pid, 0), /ESRCH/u);
+  assert((await traces()).filter(value => value.event === "job").every(value => value.root && !existsSync(value.root)));
+  output = "";
+  const beforeStreaming = (await traces()).filter(value => value.event === "settled").length;
   child.write("Run the terminal fixture.\r");
   await wait("showing stdout before completion", () => visible().includes("TUI_EARLY"));
   assert(visible().includes("Inline JS"));
   assert(visible().includes("INLINE_SOURCE_VISIBLE"));
   assert(visible().includes("Commands ("));
   await wait("adding the running job to the retention panel", () => /◐ Terminal streaming fixture \(running\)/u.test(visible()));
-  assert(!(await traces()).some(value => value.event === "settled"));
+  assert.equal((await traces()).filter(value => value.event === "settled").length, beforeStreaming);
   await wait("updating elapsed time while running", () => /elapsed 1\.\ds/u.test(visible()));
   await wait("showing stderr and final output", () => visible().includes("TUI_STDERR") && visible().includes("TUI_LATE"));
-  await wait("settled terminal run", async () => (await traces()).some(value => value.event === "settled"));
+  await wait("settled terminal run", async () => (await traces()).filter(value => value.event === "settled").length > beforeStreaming);
   assert((await traces()).filter(value=>value.event==="job").every(value=>value.root && !existsSync(value.root)));
   child.resize(120,180); // Source and command details must fit when checking expansion, not be offscreen.
   await wait("showing successful inline cleanup",()=>visible().includes("temporary files removed"));
@@ -114,6 +131,14 @@ try {
   await wait("retention panel above Powerline", () => visible().includes("Job retention (") && /scripts:\s*on/u.test(visible()));
   assert(visible().lastIndexOf("Job retention (") < visible().lastIndexOf("scripts:"));
   assert(/└─ ○ Terminal retained fixture \(retained\)/u.test(visible()), "The retained row must use the compact Todo-style layout");
+  const beforeRerun = (await traces()).filter(value => value.event === "settled").length;
+  output = "";
+  child.write("Please rerun retained source.\r");
+  await wait("latest retained rerun label while running", () => /Rerun retained source \(running\)/u.test(visible()));
+  await wait("retained inline source rerun through script_js", async () => (await traces()).filter(value => value.event === "settled").length > beforeRerun);
+  const reused = JSON.parse(await readFile(join(retainedRoot, "manifest.json"), "utf8")) as { purpose: string; lastRunPurpose: string };
+  assert.equal(reused.purpose, "Terminal retained fixture");
+  assert.equal(reused.lastRunPurpose, "Rerun retained source");
   const retainedStarts = (await traces()).filter(value => value.event === "start").length;
   output = "";
   child.write("/reload\r");
@@ -123,6 +148,7 @@ try {
   child.resize(118, 60);
   await wait("retention panel restored above Powerline", () => visible().includes("Job retention (") && /scripts:\s*on/u.test(visible()));
   assert(visible().lastIndexOf("Job retention (") < visible().lastIndexOf("scripts:"));
+  assert(/Rerun retained source \(retained\)/u.test(visible()), "Reload must restore the latest run label");
   const beforeRelease = (await traces()).filter(value => value.event === "settled").length;
   child.write("Please release retained records.\r");
   await wait("named release removes retained files", async () => (await traces()).filter(value => value.event === "settled").length > beforeRelease);
@@ -138,9 +164,10 @@ try {
   child.write("/temp-scripts off\r");
   assert(!(await checkpoint())?.tools?.includes("script_inline"));
   await wait("off Powerline status", () => /scripts:\s*off/u.test(visible()));
+  const beforeDisabledReload = (await traces()).filter(value => value.event === "start").length;
   output = "";
   child.write("/reload\r");
-  await wait("restoring disabled state after reload", async () => (await traces()).filter(value => value.event === "start").length >= 2);
+  await wait("restoring disabled state after reload", async () => (await traces()).filter(value => value.event === "start").length > beforeDisabledReload);
   await wait("disabled-state reload completed", () => visible().includes("Reloaded keybindings"));
   assert(!(await checkpoint())?.tools?.includes("script_inline"));
   output = "";
@@ -196,13 +223,20 @@ try {
   assert.equal(exit?.exitCode, 0);
   await assertServiceStopped(quitRoot);
   assert(!(await traces()).some(value => value.event === "network" || value.error));
-  console.log("PASS: actual Pi TUI; named release; Todo-style job trees; retention start/keep/release; both panels above Powerline after redraw/reload; source; streaming; resize/expansion; stop/release; native new-session and quit stop active services; zero network");
+  console.log("PASS: actual Pi TUI; two concurrent foreground rows and overlapping process lifetimes; named release; Todo-style job trees; retention start/keep/release; both panels above Powerline after redraw/reload; source; streaming; resize/expansion; stop/release; native new-session and quit stop active services; zero network");
 } catch (error) {
   console.error(JSON.stringify({ phase, traces: (await traces()).slice(-12), terminalTail: stripVTControlCharacters(output).slice(-6000) }));
   throw error;
 } finally {
   clearInterval(heartbeat);
-  if (terminal && !exit) { terminal.kill(); if (exited) await exited; }
+  if (terminal && !exit) {
+    terminal.write("\x1b");
+    terminal.write("/quit\r");
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+    try { await Promise.race([exited, new Promise<void>(accept => { cleanupTimer = setTimeout(accept, 10000); })]); }
+    finally { clearTimeout(cleanupTimer); }
+    if (!exit) { terminal.kill(); if (exited) await exited; }
+  }
   for (const value of await traces()) {
     if (value.event === "job" && value.root) {
       assert(!existsSync(join(value.root, "lease")), "Unresolved terminal job lease retained");

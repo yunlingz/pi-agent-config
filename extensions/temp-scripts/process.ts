@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { stripVTControlCharacters } from "node:util";
-import type { ProcessResult, Progress, RunStatus } from "./types.ts";
+import type { ProcessEvent, ProcessResult, Progress, RunStatus } from "./types.ts";
 import { CommandLog } from "./commands.ts";
 
 const MAX_LOG_BYTES = 16 * 1024 * 1024;
@@ -73,6 +73,7 @@ export interface ProcessOptions {
   ipc?: boolean;
   signal?: AbortSignal;
   onProgress?: (progress: Progress) => void;
+  onEvent?: (event: ProcessEvent) => void;
   heartbeatMs?: number;
   maxLogBytes?: number;
   processGroup?: boolean;
@@ -142,12 +143,14 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessResult
   let lastProgressAt = -Infinity;
   let lastOutputUpdate = -Infinity;
   child.on("message", (value: unknown) => {
-    if (value !== null && typeof value === "object" && "type" in value && value.type === "progress" && "message" in value && typeof value.message === "string") {
+    if (value !== null && typeof value === "object" && "type" in value && (value.type === "progress" || value.type === "command_progress") && "message" in value && typeof value.message === "string") {
       scriptReport = displayText(value.message).slice(0, 500);
+      if (value.type === "progress") options.onEvent?.({ kind: "progress", message: scriptReport });
       if (performance.now() - lastProgressAt >= 500) { lastProgressAt = performance.now(); report(); }
     }
     if (value !== null && typeof value === "object" && "type" in value && value.type === "command" && "event" in value) {
-      commands.append(value.event);
+      const event = commands.append(value.event);
+      if (event) options.onEvent?.({ kind: "command", command: event });
       report();
     }
   });

@@ -20,15 +20,16 @@ export class CommandLog {
   private entries: CommandEvent[] = [];
   truncated = false;
 
-  append(value: unknown): void {
+  append(value: unknown): CommandEvent | undefined {
     const event = commandEvent(value);
     if (!event) { this.truncated = true; return; }
     const previous = this.entries.findIndex(entry => entry.id === event.id);
     const next = [...this.entries];
     if (previous < 0) next.push(event);
     else next[previous] = event;
-    if (next.length > 64 || JSON.stringify(next).length > 32 * 1024) { this.truncated = true; return; }
+    if (next.length > 64 || JSON.stringify(next).length > 32 * 1024) { this.truncated = true; return event; }
     this.entries = next;
+    return event;
   }
 
   snapshot(): CommandEvent[] {

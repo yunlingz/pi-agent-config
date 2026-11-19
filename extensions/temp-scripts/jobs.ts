@@ -38,6 +38,7 @@ export async function inspectJob(reference: JobReference, sessionId: string): Pr
     || !("format" in value) || value.format !== 1 || !("sessionId" in value) || value.sessionId !== sessionId
     || !("state" in value) || !["open", "pinned", "released"].includes(String(value.state))
     || !("purpose" in value) || typeof value.purpose !== "string"
+    || ("lastRunPurpose" in value && typeof value.lastRunPurpose !== "string")
     || !("createdAt" in value) || typeof value.createdAt !== "number"
     || !("dependencies" in value) || value.dependencies === null || typeof value.dependencies !== "object") {
     throw new Error("Job ownership or manifest state is invalid");
@@ -180,6 +181,8 @@ export async function executeJob(reference: JobReference, sessionId: string, ent
     if (options.inline === undefined && !(await stat(target)).isFile()) throw new Error("Entry point must be a regular file");
     const sourceBytes = await readFile(target);
     const shown = sourceBytes.subarray(0, 32 * 1024);
+    job.lastRunPurpose = options.purpose;
+    await saveManifest(job);
     options.onSource?.({ text: shown.toString("utf8"), path: target, truncated: shown.length !== sourceBytes.length });
     const cwd = await realpath(options.cwd);
     const record = { job: job.id, run, cwd, sourceHash, stdoutPath, stderrPath, artifacts };
@@ -197,8 +200,8 @@ export async function executeJob(reference: JobReference, sessionId: string, ent
         command: process.execPath,
         args: options.inline !== undefined ? ["--input-type=module", "-"] : [...(options.test ? ["--test"] : []), target, ...args],
         stdin: options.inline, cwd, timeoutSeconds: options.untilStopped ? undefined : remaining, untilStopped: options.untilStopped, onSpawn: options.onSpawn,
-        signal: options.signal, onProgress: options.onProgress, stdoutPath, stderrPath, ipc: true,
-        env: { ...environment, PI_SCRIPT_JOB: job.id, PI_SCRIPT_WORK: source, PI_SCRIPT_RUN: run, PI_SCRIPT_ARTIFACTS: artifacts, PI_SCRIPT_RUNTIME: runtime },
+        signal: options.signal, onProgress: options.onProgress, onEvent: options.onEvent, stdoutPath, stderrPath, ipc: true,
+        env: { ...environment, PI_SCRIPT_BACKGROUND: options.background ? "1" : "0", PI_SCRIPT_JOB: job.id, PI_SCRIPT_WORK: source, PI_SCRIPT_RUN: run, PI_SCRIPT_ARTIFACTS: artifacts, PI_SCRIPT_RUNTIME: runtime },
       });
       if (!result.terminationConfirmed) keepLease();
       const output = { ...record, ...result };

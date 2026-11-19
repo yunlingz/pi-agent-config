@@ -10,7 +10,7 @@ import { cleanupJob, createJob, executeJob, finishInline, inspectJob, releaseJob
 import { blockedTool, nativeBlockReason } from "./policy.ts";
 import { displayText, runProcess } from "./process.ts";
 import { progressText } from "./progress.ts";
-import type { JobManifest, Progress, RunResult, SourceView } from "./types.ts";
+import type { JobEvent, JobManifest, Progress, RunResult, SourceView } from "./types.ts";
 import { restoredPreference, PREFERENCE_ENTRY } from "./controls.ts";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { executionEnvironment, mergeEnvironment, projectBinDirectories } from "./environment.ts";
@@ -18,6 +18,7 @@ import { nodeShimTarget, nativeInvocation } from "./executables.ts";
 import { CommandLog, commandText } from "./commands.ts";
 import { jobDirectory, storageRoot } from "./storage.ts";
 import { backgroundActive, backgroundStatus, forgetBackground, runForeground, startBackground, stopBackground, stopSessionBackground } from "./background.ts";
+import { discardJobEvents, publishJobEvent, subscribeJobEvents } from "./job-events.ts";
 
 const previousStorage = process.env.PI_TEMP_SCRIPTS_DIR;
 const testStorage = await realpath(await mkdtemp(join(tmpdir(), "script-storage-test-")));
@@ -127,6 +128,15 @@ test("the runtime environment supplies an importable file URL", async () => {
     const result = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: "Runtime URL", cwd: job.root, timeoutSeconds: 4 });
     assert.equal(result.status, "succeeded", result.output);
     assert.match(result.output, /RUNTIME_URL_OK/u);
+  });
+});
+
+test("malformed progress IPC cannot coerce an object or stop the supervising host", async () => {
+  await fixture(async job => {
+    await writeFile(join(job.root, "work", "main.mjs"), 'process.send?.({type:{toString:null,valueOf:null},message:"invalid"});console.log("IPC_IGNORED");');
+    const output = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: "Invalid progress discriminator", cwd: job.root, timeoutSeconds: 3 });
+    assert.equal(output.status, "succeeded");
+    assert(output.output.includes("IPC_IGNORED"));
   });
 });
 
@@ -479,6 +489,94 @@ test("private stable storage rejects substituted roots and preserves registered 
   }finally{await rm(root,{force:true,recursive:true});}
 });
 
+test("lifecycle events batch bursts, coalesce progress, pause and reconnect without polling", async () => {
+  const sessionId = "event-unit-session";
+  const delivered: JobEvent[] = [];
+  const next = Promise.withResolvers<void>();
+  let subscription = subscribeJobEvents(sessionId, batch => { delivered.push(...batch.events); next.resolve(); });
+  subscription.pause();
+  const event: JobEvent = { job: "owned", run: "run", purpose: "Event fixture", sequence: 1, timestamp: 0, kind: "state", status: "preparing" };
+  publishJobEvent(sessionId, event);
+  publishJobEvent(sessionId, { ...event, sequence: 2, kind: "progress", status: "running", message: "old milestone" });
+  publishJobEvent(sessionId, { ...event, sequence: 3, kind: "progress", status: "running", message: "latest milestone" });
+  subscription.dispose();
+  subscription = subscribeJobEvents(sessionId, batch => {
+    assert.equal(batch.omitted, 1);
+    delivered.push(...batch.events);
+    next.resolve();
+  });
+  try {
+    await next.promise;
+    assert.deepEqual(delivered.map(value => value.sequence), [1, 3]);
+  } finally { subscription.dispose(); discardJobEvents(sessionId); }
+});
+
+test("bounded callback inbox reports omitted updates and preserves the newest uncertain outcome", async () => {
+  const sessionId = "event-overflow-session";
+  const delivered = Promise.withResolvers<{ events: JobEvent[]; omitted: number }>();
+  const subscription = subscribeJobEvents(sessionId, batch => delivered.resolve(batch));
+  subscription.pause();
+  const event: JobEvent = { job: "owned", run: "run", purpose: "Synthetic overflow", sequence: 0, timestamp: 0, kind: "command", status: "running" };
+  for (let sequence = 1; sequence <= 80; sequence++) publishJobEvent(sessionId, { ...event, sequence });
+  publishJobEvent(sessionId, { ...event, sequence: 81, kind: "state", status: "termination_unconfirmed", terminationConfirmed: false });
+  subscription.resume();
+  try {
+    const batch = await delivered.promise;
+    assert.equal(batch.events.length, 64);
+    assert.equal(batch.omitted, 17);
+    assert.equal(batch.events.at(-1)?.status, "termination_unconfirmed");
+    assert.equal(batch.events.at(-1)?.terminationConfirmed, false);
+  } finally { subscription.dispose(); discardJobEvents(sessionId); }
+});
+
+test("background jobs push lifecycle, child commands, explicit progress and saved final results", async () => {
+  await fixture(async job => {
+    const observed: JobEvent[] = [];
+    const finished = Promise.withResolvers<void>();
+    const subscription = subscribeJobEvents(job.sessionId, batch => {
+      observed.push(...batch.events);
+      if (batch.events.some(event => event.kind === "state" && event.status === "succeeded")) finished.resolve();
+    });
+    const code = 'const {exec,progress}=await import(process.env.PI_SCRIPT_RUNTIME);progress("BEFORE_CHILD");await exec(process.execPath,["-e","console.log(42);setTimeout(()=>{},1200)","PRIVATE_ARGUMENT_FIXTURE"],{timeoutSeconds:3});progress("AFTER_CHILD");await new Promise(r=>setTimeout(r,200));';
+    await writeFile(join(job.root, "work", "main.mjs"), code);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await startBackground(job, job.sessionId, "main.mjs", [], "workspace", { purpose: "Lifecycle source", cwd: job.root, timeoutSeconds: 2 }, { startupSeconds: 2, runtimeSeconds: 5 });
+      await Promise.race([finished.promise, new Promise<void>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("No pushed final event")), 7000); })]);
+      assert.deepEqual(observed.filter(value => value.kind === "state").map(value => value.status), ["preparing", "running", "succeeded"]);
+      assert(observed.some(value => value.kind === "handoff"));
+      assert.deepEqual(observed.filter(value => value.kind === "command").map(value => value.command?.status), ["running", "succeeded"]);
+      assert(observed.some(value => value.message === "BEFORE_CHILD"));
+      assert(observed.some(value => value.message === "AFTER_CHILD"));
+      assert(!observed.some(value => value.kind === "progress" && /output bytes/u.test(value.message ?? "")), "Native command heartbeats must not become agent events");
+      const final = observed.findLast(value => value.kind === "state");
+      assert(final?.terminationConfirmed && final.output?.includes("42"));
+      assert(!existsSync(join(job.root, "lease")), "Result persistence and lease cleanup must precede the final callback");
+      assert.equal((await readdir(join(job.root, "runs"))).length, 1);
+      assert(!JSON.stringify(observed).includes("PRIVATE_ARGUMENT_FIXTURE"), "Job events must not copy native command arguments");
+      assert.equal(new Set(observed.map(event => `${event.run}:${event.sequence}`)).size, observed.length);
+    } finally { clearTimeout(timer); subscription.dispose(); }
+  });
+});
+
+test("foreground completion emits no duplicate callback and session shutdown suppresses background events", async () => {
+  await fixture(async job => {
+    const events: JobEvent[] = [];
+    const subscription = subscribeJobEvents(job.sessionId, batch => events.push(...batch.events));
+    try {
+      await writeFile(join(job.root, "work", "main.mjs"), 'console.log("normal foreground");');
+      await runForeground(job, job.sessionId, "main.mjs", [], "workspace", { purpose: "Foreground", cwd: job.root, timeoutSeconds: 3 });
+      assert.deepEqual(events, []);
+      await writeFile(join(job.root, "work", "main.mjs"), 'setInterval(()=>{},1000);');
+      await startBackground(job, job.sessionId, "main.mjs", [], "workspace", { purpose: "Shutdown", cwd: job.root, timeoutSeconds: 2 }, { startupSeconds: 2, service: true });
+      subscription.pause();
+      const before = events.length;
+      await stopSessionBackground(job.sessionId);
+      assert.equal(events.length, before);
+      assert(!existsSync(join(job.root, "lease")));
+    } finally { subscription.dispose(); }
+  });
+});
 test("background start returns before completion, retains its lease, ignores later abort and stops explicitly",async()=>{
   await fixture(async job=>{
     const code='console.log(process.pid); setInterval(()=>console.log("tick"),100);';
@@ -556,16 +654,26 @@ test("loopback readiness is checked and failed startup stops the actual process"
   const port=address.port;
   await new Promise<void>((accept,reject)=>reservation.close(error=>error?reject(error):accept()));
   await fixture(async job=>{
-    const code=`import http from "node:http";http.createServer((request,response)=>{response.statusCode=request.url==="/not-ready"?503:200;response.end("fixture");}).listen(${port},"127.0.0.1");`;
-    await writeFile(join(job.root,"work","main.mjs"),code);
-    const details=await startBackground(job,job.sessionId,"main.mjs",[],"workspace",{purpose:"readiness",cwd:job.root,timeoutSeconds:2},{startupSeconds:2,service:true,readyUrl:`http://127.0.0.1:${port}/`});
-    assert.equal(details.background?.readiness,"ready");
-    await stopBackground(job,job.sessionId);
-    forgetBackground(job.id);
-    await assert.rejects(startBackground(job,job.sessionId,"main.mjs",[],"workspace",{purpose:"failed readiness",cwd:job.root,timeoutSeconds:1},{startupSeconds:0.2,service:true,readyUrl:`http://127.0.0.1:${port}/not-ready`}),/startup failed/u);
-    assert(!backgroundActive(job.sessionId));
-    assert(!existsSync(join(job.root,"lease")));
-    forgetBackground(job.id);
+    const pushed: JobEvent[] = [];
+    const ready = Promise.withResolvers<void>();
+    const subscription = subscribeJobEvents(job.sessionId, batch => {
+      pushed.push(...batch.events);
+      if (batch.events.some(event => event.kind === "readiness" && event.status === "ready")) ready.resolve();
+    });
+    try {
+      const code = `import http from "node:http";http.createServer((request,response)=>{response.statusCode=request.url==="/not-ready"?503:200;response.end("fixture");}).listen(${port},"127.0.0.1");`;
+      await writeFile(join(job.root, "work", "main.mjs"), code);
+      const details = await startBackground(job, job.sessionId, "main.mjs", [], "workspace", { purpose: "readiness", cwd: job.root, timeoutSeconds: 2 }, { startupSeconds: 2, service: true, readyUrl: `http://127.0.0.1:${port}/` });
+      assert.equal(details.background?.readiness, "ready");
+      await ready.promise;
+      assert.deepEqual(pushed.filter(event => event.kind === "readiness").map(event => event.status), ["waiting", "ready"]);
+      await stopBackground(job, job.sessionId);
+      forgetBackground(job.id);
+      await assert.rejects(startBackground(job, job.sessionId, "main.mjs", [], "workspace", { purpose: "failed readiness", cwd: job.root, timeoutSeconds: 1 }, { startupSeconds: 0.2, service: true, readyUrl: `http://127.0.0.1:${port}/not-ready` }), /startup failed/u);
+      assert(!backgroundActive(job.sessionId));
+      assert(!existsSync(join(job.root, "lease")));
+      forgetBackground(job.id);
+    } finally { subscription.dispose(); }
   });
 });
 
@@ -584,7 +692,7 @@ test("background exec accepts omitted options while foreground exec still requir
     assert.equal(stopped.status, "cancelled");
     assert(stopped.record?.terminationConfirmed);
     forgetBackground(job.id);
-    const foreground = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: "Required foreground deadline", cwd: job.root, timeoutSeconds: 2 });
+    const foreground = await executeJob(job, job.sessionId, "main.mjs", [], { purpose: "Required foreground deadline", cwd: job.root, timeoutSeconds: 2, env: { ...process.env, PI_SCRIPT_BACKGROUND: "1" } });
     assert.equal(foreground.status, "failed");
     assert.match(foreground.output, /explicit positive deadline/u);
     assert(!foreground.output.includes("TypeError"));
@@ -628,5 +736,26 @@ test("accepted failures do not hide timeouts, unexpected failures, or failed par
     assert.equal((await finishInline(job, job.sessionId, output)).state, "retained", entry.name);
     assert(existsSync(job.root), entry.name);
     if (entry.name !== "failed parent") assert.equal(output.commands[0]?.failureAccepted, false, entry.name);
+  });
+});
+
+test("pre-event controllers remain stoppable after a reload", async () => {
+  await fixture(async job => {
+    await writeFile(join(job.root, "work", "main.mjs"), 'setInterval(()=>{},1000);');
+    await startBackground(job, job.sessionId, "main.mjs", [], "workspace", { purpose: "Legacy reload", cwd: job.root, timeoutSeconds: 2 }, { startupSeconds: 2, service: true });
+    const key = Symbol.for("pi.temp-scripts.jobs.v1");
+    // Simulate the earlier controller shape at the in-process reload boundary.
+    const host = globalThis as typeof globalThis & { [key]: Map<string, { eventRun?: string; eventSequence?: number; reporting?: boolean; updates?: JobEvent[]; omittedUpdates?: number }> };
+    const handle = host[key].get(job.id);
+    assert(handle);
+    delete handle.eventRun;
+    delete handle.eventSequence;
+    delete handle.reporting;
+    delete handle.updates;
+    delete handle.omittedUpdates;
+    const stopped = await stopBackground(job, job.sessionId);
+    assert.equal(stopped.status, "cancelled");
+    assert(stopped.record?.terminationConfirmed);
+    assert(!existsSync(join(job.root, "lease")));
   });
 });
