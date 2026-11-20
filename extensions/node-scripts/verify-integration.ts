@@ -69,10 +69,6 @@ try {
     }],
   });
   await loader.reload(); assert.deepEqual(loader.getExtensions().errors, []);
-  const extension = loader.getExtensions().extensions.find(value => value.tools.has("node_job_create")); assert(extension);
-  assert.equal(extension.tools.size, 9);
-  assert.equal(extension.tools.get("node_job_run")?.definition.executionMode, "sequential");
-  assert(!extension.handlers.has("message_end"), "No callback message bridge is needed");
   const manager = sdk.SessionManager.create(root, join(root, "sessions"));
   const model = runtime.getModel("node-scripts-fixture", "fixture"); assert(model);
   ({ session } = await sdk.createAgentSession({ cwd: root, agentDir: root, settingsManager: settings, modelRuntime: runtime, model, resourceLoader: loader, sessionManager: manager }));
@@ -87,6 +83,11 @@ try {
       widget.set(key, Array.isArray(content) ? new tui.Text(content.join("\n"), 0, 0) : content(testTUI(new tui.Container()), theme));
     },
   }), onError: error => errors.push(error) });
+  const extension = loader.getExtensions().extensions.find(value => value.tools.has("node_job_create")); assert(extension);
+  assert.equal(extension.tools.size, 9);
+  assert.equal(extension.tools.get("node_job_run")?.definition.executionMode, "sequential");
+  assert(!extension.handlers.has("message_end"), "No callback message bridge is needed");
+  assert(!extension.handlers.has("before_agent_start"), "Guidance belongs to standard tool registration");
   assert.equal(statuses.get("node-scripts"), "node-scripts: on");
   const workspace = join(root, "workspaces", manager.getSessionId());
   assert(existsSync(join(workspace, "scripts")));
@@ -98,6 +99,11 @@ try {
     assert(output?.role === "toolResult");
     assert.equal(output.isError, error, JSON.stringify(output.content));
     return output;
+  };
+  const checkPrompt = () => {
+    assert(!providerPrompt.includes("<node_scripts_workspace>"));
+    assert.equal(providerPrompt.split(`Current node-scripts workspace: ${workspace}.`).length - 1, 1);
+    assert(providerPrompt.includes("Before creating another node-scripts script, check existing workspace scripts"));
   };
   const details = <T>(value: { details?: unknown }) => value.details as T; // Extension-owned controlled tool result.
   const create = async (scriptPath: string, timeoutSeconds?: number, name?: string) => details<JobView>(await execute("node_job_create", { scriptPath, ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }), ...(name ? { name } : {}) }));
@@ -112,6 +118,9 @@ try {
   const panel = (width = 180) => widget.get("node-scripts-jobs")?.render(width).map(stripVTControlCharacters).join("\n") ?? "";
   const empty = details<{ workspace: string; jobs: JobView[]; total: number }>(await execute("node_job_list", { status: "created", recentN: 10 }));
   assert.equal(empty.workspace, workspace); assert.deepEqual(empty.jobs, []); assert.equal(empty.total, 0);
+  checkPrompt();
+  const guidelines = session.getAllTools().find(tool => tool.name === "node_job_create")?.promptGuidelines;
+  assert(guidelines?.some(line => line.includes(workspace)));
   const invalidLists: ToolCall["arguments"][] = [{}, { status: "created" }, { recentN: 10 }, { status: "all", recentN: 10 }, { status: "created", recentN: 0 }];
   for (const args of invalidLists) await execute("node_job_list", args, true);
   await execute("bash", { command: "git --version" }, true);
@@ -125,9 +134,45 @@ try {
   const finished = details<Query>(await execute("node_job_run", { jobId: one.id }));
   assert.equal(finished.status, "finished"); assert(finished.stdout.includes("AFTER") && finished.stderr.includes("ERR"));
   await execute("node_job_run", { jobId: one.id }, true);
-  assert(providerPrompt.includes(`Workspace: ${workspace}`));
+  const renderer = session.getToolDefinition("node_job_run"); assert(renderer?.renderCall && renderer.renderResult);
+  const theme = testUI(session, {}).theme;
+  const renderContext: Parameters<NonNullable<typeof renderer.renderResult>>[3] = {
+    args: { jobId: one.id }, toolCallId: "render-fixture", state: {}, cwd: root, executionStarted: true, argsComplete: true,
+    isPartial: false, expanded: false, showImages: false, isError: false, durationMs: 1, outputPad: 0,
+    lastComponent: undefined, invalidate() {}, keyText: () => "ctrl+o", keyHint: (_key, description) => `ctrl+o ${description}`,
+  };
+  const renderedResult = { content: [{ type: "text" as const, text: "FULL_EVIDENCE\n" + finished.stdout }], details: finished };
+  const themes: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(installation, "dist/modes/interactive/theme/theme.js")).href);
+  const light = themes.getThemeByName("light"); assert(light);
+  for (const palette of [theme, light]) for (const width of [24, 60, 120]) {
+    const title = renderer.renderCall({ jobId: one.id }, palette, renderContext)?.render(width) ?? [];
+    const compact = renderer.renderResult(renderedResult, { expanded: false, isPartial: false }, palette, renderContext)?.render(width) ?? [];
+    assert(title.length === 1 && compact.length <= 4);
+    assert([...title, ...compact].every(line => tui.visibleWidth(line) <= width));
+    assert(!compact.join("\n").includes("Workspace:"));
+    const full = renderer.renderResult(renderedResult, { expanded: true, isPartial: false }, palette, renderContext)?.render(width).join("\n") ?? "";
+    assert(full.includes("FULL_EVIDENCE"));
+  }
+  const renderTitle = stripVTControlCharacters(renderer.renderCall({ jobId: one.id }, theme, renderContext)?.render(180).join("\n") ?? "");
+  assert(renderTitle.includes("Main run"));
+  console.log("RENDER INLINE:\n" + renderTitle + "\n" + (renderer.renderResult(renderedResult, { expanded: false, isPartial: false }, theme, renderContext)?.render(120) ?? []).map(stripVTControlCharacters).join("\n"));
+  checkPrompt();
   assert(providerPrompt.includes("must use .mjs files and ESM syntax"));
   assert(!/Use read\/write\/edit|write\/edit only|author.*with native/iu.test(providerPrompt));
+  assert.equal(finished.sourceState, "same");
+  assert.match(finished.scriptSha256AtStart ?? "", /^[0-9a-f]{64}$/u);
+  await execute("edit", { path: join(workspace, "scripts", "main.mjs"), edits: [{ oldText: "AFTER", newText: "REUSED" }] });
+  assert.equal(details<Query>(await execute("node_job_query", { jobId: one.id })).sourceState, "changed");
+  const reused = await create("scripts/main.mjs", 5, "Reused source");
+  const changed = details<Query>(await execute("node_job_run", { jobId: reused.id }));
+  assert.notEqual(changed.scriptSha256AtStart, finished.scriptSha256AtStart);
+  assert(changed.stdout.includes("REUSED"));
+  await execute("rm", { path: join(workspace, "scripts", "main.mjs") });
+  const removed = details<Query>(await execute("node_job_query", { jobId: one.id }));
+  assert.equal(removed.sourceState, "missing"); assert.equal(removed.status, "finished");
+  assert.equal(removed.stdout, finished.stdout); assert.equal(removed.scriptSha256AtStart, finished.scriptSha256AtStart);
+  await execute("write", { path: join(workspace, "scripts", "main.mjs"), content: 'console.log("REUSED");console.error("ERR");' });
+  await execute("node_job_deprecate", { jobId: reused.id });
   await execute("node_job_deprecate", { jobId: one.id });
   assert(!panel().includes("Main run")); assert(existsSync(finished.stdoutPath));
   await writeFile(join(workspace, "scripts", "large.mjs"), 'process.stdout.write("x".repeat(80000));process.stderr.write("y".repeat(80000));');
@@ -160,6 +205,7 @@ try {
   await session.reload();
   const afterReload = details<Query>(await execute("node_job_query", { jobId: background.id }));
   assert(afterReload.stdout.includes(`SERVICE_PID ${pid}`) && afterReload.active);
+  checkPrompt(); assert.equal(afterReload.sourceState, "same");
   settings.setCompactionEnabled(true); highUsage = true;
   await session.prompt("Trigger native automatic compaction."); await session.waitForIdle(); settings.setCompactionEnabled(false);
   assert(summaryRequests >= 2); process.kill(pid, 0);
@@ -190,7 +236,7 @@ try {
   await execute("node_job_deprecate", { jobId: background.id }); assert.throws(() => process.kill(pid, 0), /ESRCH/u);
 
   const ids: string[] = [];
-  for (let index = 0; index < 12; index++) ids.push((await create("scripts/main.mjs", 5, `Visible job ${index}`)).id);
+  for (let index = 0; index < 12; index++) ids.push((await create("scripts/main.mjs", 5, `Visible job ${index}${index === 11 ? " 界😀é" : ""}`)).id);
   const listed = details<{ jobs: JobView[]; total: number; hasMore: boolean }>(await execute("node_job_list", { status: "created", recentN: 10 }));
   assert.equal(listed.jobs.length, 10); assert.equal(listed.total, 12);
   assert(listed.hasMore);
@@ -198,14 +244,24 @@ try {
   const names = listed.jobs.slice(0, 8).map(job => job.name);
   for (const name of names) assert(panel().includes(name));
   assert.equal((panel().match(/Visible job/gu) ?? []).length, 8);
+  console.log("RENDER PANEL:\n" + panel(140));
   await session.prompt("/node-scripts expand"); assert.equal((panel().match(/Visible job/gu) ?? []).length, 12);
   for (const width of [120, 60, 24]) assert((widget.get("node-scripts-jobs")?.render(width) ?? []).every(line => tui.visibleWidth(line) <= width));
+  for (const width of [100, 120, 180]) {
+    const rows = (widget.get("node-scripts-jobs")?.render(width) ?? []).slice(1).filter(line => stripVTControlCharacters(line).includes("created"));
+    const columns = rows.map(line => tui.visibleWidth(line.slice(0, line.indexOf("created"))));
+    assert(columns.length > 1 && columns.every(value => value === columns[0]), "Status columns align with wide and combining characters");
+    assert(rows.every(line => !line.includes("\t")));
+  }
   for (const id of ids) await execute("node_job_deprecate", { jobId: id });
   await session.prompt("/node-scripts off"); assert.equal(statuses.get("node-scripts"), "node-scripts: off");
   assert(!session.getActiveToolNames().includes("node_job_create"));
   assert.match((await execute("bash", { command: "git --version" })).content.filter(block => block.type === "text").map(block => block.text).join(""), /git version/u);
+  assert(!providerPrompt.includes("Current node-scripts workspace:"));
+  assert(!providerPrompt.includes("Before creating another node-scripts script"));
   await session.reload(); assert(!session.getActiveToolNames().includes("node_job_create"));
   await session.prompt("/node-scripts on"); assert(session.getActiveToolNames().includes("node_job_create"));
+  await execute("node_job_list", { status: "finished", recentN: 10 }); checkPrompt();
   assert.deepEqual(errors, []); assert.equal(network, 0);
   console.log("PASS: automatic discovery; nine tools; native file tools; direct/nested shell gates; filesystem safety; single-use and deprecation; shared panel/list ranking; streaming and retained logs; timed interruption before native compaction; Escape/reload; background PID continuity across manual/automatic compaction/reload; no callbacks; toggle; narrow layouts; zero external requests");
 } finally {

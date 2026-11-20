@@ -22,7 +22,8 @@ node_job_list      -->  available file tools --> node_job_create --> node_job_ru
                        finished / failed / timeout                      node_job_query when needed
 ```
 
-The extension does not choose which file tools Pi uses. Its generic prompt section exposes the current workspace and ESM conventions.
+The extension uses Pi's standard tool descriptions, snippets, and guidelines for workspace, ESM, and reuse instructions.
+It refreshes registered guidelines after workspace initialization, so the current path appears without a custom prompt hook.
 `node_job_list` also returns the workspace path, even when there are no jobs.
 
 ## A short example
@@ -62,6 +63,28 @@ Call `node_job_run` with the returned UUID:
 
 The tool waits for completion and returns the status, output tails, and full log paths.
 To execute the script again, create another job. The script file can be reused; the job cannot.
+
+## Reuse and source identity
+
+Before creating another script, inspect existing workspace helpers. Prefer arguments and focused edits when an existing script fits.
+For example, create another job for `scripts/hello.mjs` with `"args": ["world"]`; do not copy the script.
+Use relative ESM imports for useful shared helpers. Do not extract helpers solely to avoid small duplication.
+
+The runner records `scriptSha256AtStart` from the entry file's exact bytes immediately before launch.
+It saves the digest in the job record, not a source snapshot. Later edits or deletion leave the execution evidence intact.
+`node_job_query` computes `scriptSha256Current` on demand and reports `sourceState`:
+
+| State | Meaning |
+| --- | --- |
+| `same` | Current entry bytes match the launch digest |
+| `changed` | Current entry bytes differ |
+| `missing` | The entry file was deleted |
+| `unreadable` | The current entry cannot be safely read |
+| `not_recorded` | No launch digest exists, including older jobs and unlaunched jobs |
+
+Source comparisons never alter status, logs, or activity order. The panel and list do not hash source files.
+The digest covers only the entry file, not imports, dependencies, inputs, or environment. It cannot recover old source.
+Without snapshots or filesystem locks across Node startup, an external edit can occur between hashing and Node reading the file.
 
 ## ESM only
 
@@ -115,6 +138,7 @@ A running job prevents a workspace-root change. No automatic migration occurs.
 ├── package.json                  private ESM package
 ├── package-lock.json             npm lockfile, when dependencies exist
 ├── node_modules/                 dependencies shared by this session's scripts
+├── .npm-cache/                   session-local npm download cache
 ├── scripts/                      ordinary .mjs source files
 ├── jobs/
 │   └── <job-uuid>.json            definition and execution metadata
@@ -125,7 +149,7 @@ A running job prevents a workspace-root change. No automatic migration occurs.
     └── npm-<operation-uuid>/      npm output and result evidence
 ```
 
-`jobs/<uuid>.json` stores the name, script path, arguments, timeout, state, timestamps, output-recency metadata, and exit/termination information.
+`jobs/<uuid>.json` stores the name, script path, launch digest, arguments, timeout, state, timestamps, output metadata, and exit/termination information.
 It does not copy script source, the inherited environment, or full output.
 
 The same Pi session UUID uses the same workspace across compaction, reload, and resume. A new UUID uses another workspace.
@@ -228,20 +252,21 @@ Powerline displays exactly `node-scripts: on`, `node-scripts: off`, or `node-scr
 The extension defaults on. The active branch stores the preference across reload and resume.
 
 ```text
-Jobs · 1 sync · 2 background · 1 created · 6 terminal
-◐ [7f3a] started · async · unlimited · Local server — Listening on :8080
-◐ [b914] started · sync · 60s · Project tests — Test 12 passed
-◐ [a521] started · async · unlimited · Quiet worker — no output
-○ [c315] created · sync · 30s · Generate report — no output
-✓ [ac31] finished · sync · 10s · Format report — Report written
-✓ [9521] finished · sync · 10s · Generate report — Done
-✓ [fa22] finished · sync · 10s · Parse metrics — Read 32 rows
-✓ [29c1] finished · sync · 10s · Check inputs — Valid
-+2 jobs · /node-scripts expand
+● Node jobs (3 running · 1 created · 6 ended)
+├─ ◐ [7f3a] Local server       started    bg             — Listening on :8080
+├─ ◐ [b914] Project tests      started    sync 60s       — Test 12 passed
+├─ ◐ [a521] Quiet worker       started    bg
+├─ ○ [c315] Generate report    created    sync 30s
+├─ ✓ [ac31] Format report      finished   sync 10s       — Report written
+├─ ✓ [9521] Generate report    finished   sync 10s       — Done
+├─ ✓ [fa22] Parse metrics      finished   sync 10s       — Read 32 rows
+├─ ✓ [29c1] Check inputs       finished   sync 10s       — Valid
+└─ +2 jobs · /node-scripts expand
 ```
 
 The collapsed panel has at most ten physical lines: one summary, up to eight one-line job rows, and one overflow line.
-Each row includes its latest nonempty output, shortened to the remaining terminal width. Rows never wrap or add spacer lines.
+Wide layouts align names, status, execution mode/deadline, and latest output using terminal-width-aware space padding, not literal tabs.
+Narrow layouts omit secondary columns. Rows never wrap or add spacer lines.
 If more than eight jobs run, the overflow line reports how many running jobs are hidden. Expansion shows every nondeprecated job.
 Summary counts cover all nondeprecated jobs; `unconfirmed` appears when needed. Empty panels are hidden.
 The panel refreshes locally above Powerline without transcript entries or model requests.
@@ -258,8 +283,9 @@ The panel refreshes locally above Powerline without transcript entries or model 
 Disabling rejects while jobs or npm operations are running. Finish or deprecate jobs first.
 Disabling removes these nine tools and shell gates; it does not enable unavailable native tools or delete anything.
 
-Transcript rows show the definition, bounded live output, terminal status, and evidence paths. Expansion reveals more details.
-There is no duplicated inline-source block because scripts are ordinary files.
+Transcript calls show a short action and job name, following the installed todo plugin's visual conventions.
+Collapsed results show status and the latest output, with source warnings when needed.
+Expansion shows full UUIDs, aligned metadata, source hashes, arguments, log paths, and bounded output without empty stdout/stderr headings.
 
 ## npm dependencies
 
@@ -278,6 +304,11 @@ Some native/build-dependent packages need installation scripts and will not work
 Absolute and `~/` paths work. `mkdir` creates missing parents and accepts an existing directory.
 `rm` requires `recursive: true` for directories, removes links themselves rather than targets, and reports missing paths.
 Empty removal paths, filesystem roots, and the user's home directory reject. Other deletion is permanent.
+
+Managed script entries, job records, logs, and npm control files must stay inside the current session's canonical workspace.
+The plugin checks path containment, existing ancestor links, hard links, and workspace identity before managed file operations.
+npm's mutable trees permit internal bin links but reject links outside this workspace. npm cache and operation logs stay inside it.
+These checks do not restrict general `mkdir`/`rm`, script imports, or child-process filesystem access. They do not prevent external filesystem races.
 
 Shell blocking applies to agent-issued native `bash` and `powershell`, including nested calls. Manual user `!` commands remain native.
 Arbitrary scripts and existing programs have normal OS permissions. This is workflow control, not a security sandbox.

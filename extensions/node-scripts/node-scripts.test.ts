@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { parseConfig } from "./config.ts";
 import { Workspace, sessionWorkspace } from "./workspace.ts";
-import { jobActivity, listJobs, panelJobs, type JobView } from "./types.ts";
+import { jobActivity, listJobs, panelJobs, type Job, type JobView } from "./types.ts";
 import { dependencies } from "./npm.ts";
+import { managedTree } from "./paths.ts";
 
 async function fixture(action: (store: Workspace, root: string) => Promise<void>) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "node-scripts-unit-")));
@@ -108,6 +109,9 @@ test("background work returns at startup, survives same-process reload, and depr
     const reloaded = await sessionWorkspace({ rootFolder: join(store.root, ".."), npmRegistry: store.registry }, store.sessionId);
     assert.equal(cached, reloaded);
     await store.interruptTimed(); assert.equal(store.active, 1);
+    Object.setPrototypeOf(cached, Object.create(Workspace.prototype));
+    assert.equal(await sessionWorkspace({ rootFolder: join(store.root, ".."), npmRegistry: store.registry }, store.sessionId), cached);
+    assert.equal(Object.getPrototypeOf(cached), Workspace.prototype, "Reload adopts current methods without replacing ownership");
     const record = await store.query(job.id);
     const pid = Number(record.stdout.split("\n")[0]); assert(Number.isInteger(pid) && pid > 0);
     const stopped = await store.deprecate(job.id);
@@ -144,7 +148,7 @@ test("definition validation, missing scripts, links and launch races preserve si
     await assert.rejects(store.createJob({ scriptPath: "../outside.mjs" }));
     const external = join(root, "external.mjs"); await writeFile(external, 'console.log("outside");');
     await symlink(external, join(store.root, "scripts", "link.mjs"));
-    await assert.rejects(store.createJob({ scriptPath: "scripts/link.mjs" }), /regular/u);
+    await assert.rejects(store.createJob({ scriptPath: "scripts/link.mjs" }), /links/u);
     const job = await store.createJob({ scriptPath: "scripts/main.mjs", timeoutSeconds: 5 });
     const run = store.run(job.id);
     await assert.rejects(store.run(job.id), /only once/u);
@@ -158,6 +162,123 @@ test("definition validation, missing scripts, links and launch races preserve si
     assert.equal((await store.run(missing.id)).status, "failed");
     await assert.rejects(store.run(missing.id), /only once/u);
     await assert.rejects(store.query("1234"), /complete/u);
+  });
+});
+
+test("launch hashes identify reusable source without retaining versions or changing evidence", async () => {
+  await fixture(async store => {
+    const path = join(store.root, "scripts", "reuse.mjs");
+    const first = 'console.log("FIRST",process.argv[2]);\n';
+    const second = 'console.log("SECOND",process.argv[2]);\n';
+    await writeFile(path, first);
+    const created = await store.createJob({ scriptPath: "scripts/reuse.mjs", args: ["one"], timeoutSeconds: 5 });
+    assert.equal(created.scriptSha256AtStart, undefined);
+    assert.equal((await store.query(created.id)).sourceState, "not_recorded");
+    await writeFile(path, second);
+    const output = await store.run(created.id);
+    const expected = createHash("sha256").update(second).digest("hex");
+    assert.equal(output.scriptSha256AtStart, expected);
+    assert.equal(output.scriptSha256Current, expected);
+    assert.equal(output.sourceState, "same");
+    assert.match(output.stdout, /SECOND one/u);
+    const again = await store.run((await store.createJob({ scriptPath: "scripts/reuse.mjs", args: ["two"], timeoutSeconds: 5 })).id);
+    assert.equal(again.scriptSha256AtStart, expected);
+    assert.match(again.stdout, /SECOND two/u);
+    const record = join(store.root, "jobs", `${created.id}.json`);
+    const saved = await readFile(record, "utf8");
+    const activity = jobActivity(output);
+    await writeFile(path, second.replace("\n", "\r\n"));
+    assert.equal((await store.query(created.id)).sourceState, "changed", "Hash exact bytes, including line endings");
+    await rm(path);
+    const missing = await store.query(created.id);
+    assert.equal(missing.sourceState, "missing");
+    assert.equal(missing.scriptSha256AtStart, expected);
+    assert.equal(missing.scriptSha256Current, undefined);
+    assert.equal(missing.status, "finished");
+    assert.deepEqual(jobActivity(missing), activity);
+    assert.equal(await readFile(record, "utf8"), saved);
+    assert.equal(await readFile(output.stdoutPath, "utf8"), output.stdout);
+    await mkdir(path);
+    assert.equal((await store.query(created.id)).sourceState, "unreadable");
+    await rm(path, { recursive: true });
+    const reopened = await Workspace.create({ rootFolder: join(store.root, ".."), npmRegistry: store.registry }, store.sessionId);
+    assert.equal((await reopened.query(created.id)).sourceState, "missing");
+    const old = JSON.parse(saved) as Job;
+    delete old.scriptSha256AtStart;
+    await writeFile(record, JSON.stringify(old));
+    const legacy = await Workspace.create({ rootFolder: join(store.root, ".."), npmRegistry: store.registry }, store.sessionId);
+    assert.equal((await legacy.query(created.id)).sourceState, "not_recorded");
+    assert.equal((await store.deprecate(created.id)).scriptSha256AtStart, expected);
+  });
+});
+
+test("managed paths reject other sessions, linked ancestors, linked controls and a replaced workspace", async () => {
+  await fixture(async (store, root) => {
+    const outside = join(root, "outside");
+    await mkdir(outside);
+    const original = join(outside, "keep.mjs");
+    await writeFile(original, 'console.log("KEEP");');
+    await assert.rejects(store.managedPath("..", "another-session", "entry.mjs"), /inside/u);
+    const shortcut = join(store.root, "scripts", "escape");
+    await symlink(outside, shortcut, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(store.createJob({ scriptPath: "scripts/escape/keep.mjs" }), /links/u);
+    await link(original, join(store.root, "scripts", "hard.mjs"));
+    await assert.rejects(store.createJob({ scriptPath: "scripts/hard.mjs" }), /links/u);
+    for (const name of [".npmrc", ".npm-globalrc", "package-lock.json", "npm-shrinkwrap.json", "node_modules", ".npm-cache"]) {
+      const target = join(store.root, name);
+      const directory = ["node_modules", ".npm-cache"].includes(name);
+      await symlink(directory ? outside : original, target, directory ? process.platform === "win32" ? "junction" : "dir" : "file");
+      try { await assert.rejects(dependencies(store, "add", "is-number", "7.0.0"), /links/u); }
+      finally { await rm(target); }
+    }
+    const packages = join(store.root, "node_modules");
+    await mkdir(packages);
+    await symlink(outside, join(packages, "escape"), process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(dependencies(store, "add", "is-number", "7.0.0"), /inside/u);
+    await rm(join(packages, "escape"));
+    await writeFile(join(packages, "bin.mjs"), "export {};");
+    await symlink(join(packages, "bin.mjs"), join(packages, "bin-link"), "file");
+    await managedTree(store.root, "node_modules");
+    const internal = join(store.root, "internal-package");
+    await mkdir(internal);
+    await symlink(outside, join(internal, "escape"), process.platform === "win32" ? "junction" : "dir");
+    await symlink(internal, join(packages, "inside"), process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(managedTree(store.root, "node_modules"), /inside/u);
+    await rm(packages, { recursive: true });
+    await writeFile(join(store.root, "scripts", "safe.mjs"), 'console.log("SAFE");');
+    const job = await store.createJob({ scriptPath: "scripts/safe.mjs", timeoutSeconds: 5 });
+    const output = await store.run(job.id);
+    await rm(output.stdoutPath);
+    await symlink(original, output.stdoutPath);
+    await assert.rejects(store.query(job.id), /links/u);
+    await rm(output.stdoutPath);
+    const jobs = join(store.root, "jobs"), parkedJobs = join(store.root, "saved-jobs");
+    await rename(jobs, parkedJobs); await symlink(outside, jobs, process.platform === "win32" ? "junction" : "dir");
+    try {
+      await assert.rejects(store.createJob({ scriptPath: "scripts/safe.mjs" }), /links/u);
+      await assert.rejects(store.deprecate(job.id), /links/u);
+      assert.equal(store.jobs.get(job.id)?.status, "finished", "A rejected write must not report a saved deprecation");
+    }
+    finally { await rm(jobs); await rename(parkedJobs, jobs); }
+    const parked = store.root + "-saved";
+    await rename(store.root, parked); await symlink(outside, store.root, process.platform === "win32" ? "junction" : "dir");
+    try { await assert.rejects(store.managedPath("scripts", "safe.mjs"), /identity/u); }
+    finally { await rm(store.root); await rename(parked, store.root); }
+    assert.equal(await readFile(original, "utf8"), 'console.log("KEEP");');
+  });
+});
+
+test("concurrent record readers do not break Windows state replacement", async () => {
+  await fixture(async store => {
+    await writeFile(join(store.root, "scripts", "main.mjs"), "export {};\n");
+    for (let index = 0; index < 20; index++) {
+      const job = await store.createJob({ scriptPath: "scripts/main.mjs" });
+      const path = join(store.root, "jobs", `${job.id}.json`);
+      let reading = true;
+      const reader = (async () => { while (reading) assert.equal((JSON.parse(await readFile(path, "utf8")) as Job).id, job.id); })();
+      try { assert.equal((await store.deprecate(job.id)).status, "deprecated"); }
+      finally { reading = false; await reader; }
+    }
   });
 });
 

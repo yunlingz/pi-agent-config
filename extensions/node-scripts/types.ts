@@ -5,6 +5,7 @@ export interface Job {
   id: string;
   name: string;
   scriptPath: string;
+  scriptSha256AtStart?: string;
   args: string[];
   timeoutSeconds?: number;
   status: Status;
@@ -29,6 +30,8 @@ export interface JobView extends Omit<Job, "status"> {
 }
 
 export interface Query extends JobView {
+  sourceState: "same" | "changed" | "missing" | "unreadable" | "not_recorded";
+  scriptSha256Current?: string;
   stdout: string;
   stderr: string;
   outputTruncated: boolean;

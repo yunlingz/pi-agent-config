@@ -48,15 +48,20 @@ try {
   const prompt = async (text: string) => { const before = await count("settled"); child.write(`${text}\r`); await wait(text, async () => await count("settled") > before); };
   const latest = async (name: string) => { const value = (await traces()).findLast(value => value.job?.name === name)?.job; assert(value); return value; };
   const persisted = async (job: Query | Awaited<ReturnType<typeof latest>>) => JSON.parse(await readFile(join(job.workspace, "jobs", `${job.id}.json`), "utf8")) as Job;
-  const reload = async () => { const before = await count("start"); output = ""; child.write("/reload\r"); await wait("native reload", async () => await count("start") > before); await wait("reload complete", () => visible().includes("Reloaded keybindings")); };
+  const reload = async () => {
+    const before = await count("start"); output = ""; child.write("/reload\r");
+    await wait("native reload", async () => await count("start") > before);
+    await wait("reload complete", () => visible().includes("Reloaded keybindings"));
+    await new Promise(accept => setTimeout(accept, 150));
+  };
   await wait("exact Powerline on label", () => /node-scripts:\s*on/u.test(visible()));
   await prompt("Run a background service.");
   const service = await latest("Terminal service");
-  await wait("actual service output and panel", async () => /SERVICE_LIVE \d+/u.test(await readFile(service.stdoutPath, "utf8")) && visible().includes("Jobs ·") && visible().includes("LATEST_SERVICE_LINE"));
+  await wait("actual service output and panel", async () => /SERVICE_LIVE \d+/u.test(await readFile(service.stdoutPath, "utf8")) && visible().includes("Node jobs") && visible().includes("LATEST_SERVICE_LINE"));
   const pid = Number(/SERVICE_LIVE (\d+)/u.exec(await readFile(service.stdoutPath, "utf8"))?.[1]); assert(pid > 0);
   output = ""; child.resize(119, 44);
-  await wait("panel above Powerline", () => visible().includes("Jobs ·") && /node-scripts:\s*on/u.test(visible()));
-  assert(visible().lastIndexOf("Jobs ·") < visible().lastIndexOf("node-scripts:"));
+  await wait("panel above Powerline", () => visible().includes("Node jobs") && /node-scripts:\s*on/u.test(visible()));
+  assert(visible().lastIndexOf("Node jobs") < visible().lastIndexOf("node-scripts:"));
   const settled = await count("settled"); await new Promise(accept => setTimeout(accept, 1200));
   assert.equal(await count("settled"), settled, "Background output must not resume the agent");
   await prompt("Add history for native compaction.");
@@ -65,24 +70,39 @@ try {
   await reload(); process.kill(pid, 0);
   assert.equal((await persisted(service)).status, "started");
   const beforeTimed = await count("job"); child.write("Run a timed job.\r");
-  await wait("timed process starts", async () => await count("job") > beforeTimed && visible().includes("TIMED_LIVE"));
+  await wait("timed process starts", async () => {
+    const job = (await traces()).findLast(value => value.job?.name === "Terminal timed job")?.job;
+    return Boolean(job && await count("job") > beforeTimed && /TIMED_LIVE \d+/u.test(await readFile(job.stdoutPath, "utf8").catch(() => "")));
+  });
   const timed = await latest("Terminal timed job");
   child.write("\x1b");
   await wait("Escape deprecates timed job", async () => (await persisted(timed)).status === "deprecated");
   await reload(); process.kill(pid, 0);
   assert.equal((await persisted(timed)).terminationConfirmed, true);
+  assert(visible().includes("node → Terminal timed job"));
+  assert(!visible().includes("SHA-256 at launch:"), "Historical tool results stay compact after reload");
   await prompt("Create many panel jobs.");
   output = ""; child.resize(120, 100);
   await wait("collapsed eight-job panel", () => visible().includes("jobs · /node-scripts expand"));
   child.write("/node-scripts expand\r"); output = ""; child.resize(119, 100);
-  await wait("expanded all-job panel", () => visible().includes("Stored terminal 9"));
-  console.log("RENDER: " + visible().slice(visible().lastIndexOf("Jobs ·"), visible().lastIndexOf("node-scripts:")));
+  const oldest = await latest("Stored terminal 0");
+  await wait("expanded all-job panel", () => visible().includes(`[${oldest.id}] Stored terminal 0`));
+  console.log("RENDER: " + visible().slice(visible().lastIndexOf("Node jobs"), visible().lastIndexOf("node-scripts:")));
   child.resize(60, 24); await new Promise(accept => setTimeout(accept, 100)); child.resize(120, 100);
   await prompt("Please deprecate the active worker.");
   assert.equal((await persisted(service)).status, "deprecated"); assert.throws(() => process.kill(pid, 0), /ESRCH/u);
   assert(existsSync(service.stdoutPath));
+  const launchHash = (await persisted(service)).scriptSha256AtStart;
+  assert.match(launchHash ?? "", /^[0-9a-f]{64}$/u);
+  await rm(join(service.workspace, service.scriptPath));
+  await prompt("Do a source check.");
+  const checked = await latest("Terminal service") as Query;
+  assert.equal(checked.sourceState, "missing"); assert.equal(checked.scriptSha256AtStart, launchHash);
+  await wait("compact source warning", () => visible().includes("Source missing"));
   child.write("/node-scripts off\r"); await wait("exact Powerline off label", () => /node-scripts:\s*off/u.test(visible()));
   await reload(); await wait("off survives reload", () => /node-scripts:\s*off/u.test(visible()));
+  await prompt("Check guidance while disabled.");
+  assert.equal((await traces()).findLast(value => value.event === "prompt")?.workspace, undefined);
   child.write("/node-scripts on\r"); await wait("on restored", () => /node-scripts:\s*on/u.test(visible()));
   await prompt("Run a background service.");
   const replaced = await latest("Terminal service");
@@ -99,6 +119,8 @@ try {
   finally { clearTimeout(timer); }
   assert.equal(exit?.exitCode, 0); assert.equal((await persisted(quitting)).status, "deprecated");
   assert.notEqual(quitting.workspace, replaced.workspace, "A new session needs a different consistent workspace");
+  const promptWorkspaces = (await traces()).filter(value => value.event === "prompt").map(value => value.workspace);
+  assert(promptWorkspaces.includes(replaced.workspace) && promptWorkspaces.includes(quitting.workspace));
   assert(!(await traces()).some(value => value.event === "network" || value.error));
   console.log("PASS: actual Pi TUI; exact node-scripts Powerline labels; service output and panel; no callback turns; compaction/reload continuity; timed Escape/deprecation; eight-row/expanded selection; resize; retained logs; off/on/reload; native new-session isolation/deprecation; graceful quit");
 } catch (error) {

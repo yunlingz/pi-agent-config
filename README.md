@@ -69,6 +69,8 @@ The local [node-scripts extension](extensions/node-scripts/README.md) provides o
 It runs single-use `.mjs` jobs with Pi's Node binary and inherited environment, plus npm dependency operations, `rm`, and `mkdir`.
 Timed jobs wait for a result; indefinite background jobs return after startup and survive compaction/reload. Interrupted timed jobs are deprecated.
 The agent queries status when needed. There are no proactive callbacks, source snapshots, or automatic log cleanup.
+Script files remain reusable and editable. Jobs retain their launch SHA-256; queries report whether the current entry changed or disappeared.
+Managed files stay within the session workspace. The compact panel uses aligned columns and todo-style rows; expansion shows execution evidence.
 When enabled, it blocks agent-issued Bash and PowerShell calls; manual user shell commands remain unchanged.
 `/node-scripts on|off|status|expand|collapse` controls the branch preference and panel.
 Powerline displays exactly `node-scripts: on`, `node-scripts: off`, or `node-scripts: error`.

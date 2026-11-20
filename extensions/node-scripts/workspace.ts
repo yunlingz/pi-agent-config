@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, existsSync } from "node:fs";
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Config } from "./config.ts";
 import { startProcess } from "./process.ts";
+import { managedPath } from "./paths.ts";
 import { UUID, listJobs, type Job, type JobView, type Query, type Status } from "./types.ts";
 
 type Controller = ReturnType<typeof startProcess>;
@@ -27,6 +28,12 @@ async function tail(path: string) {
   } finally { await file.close(); }
 }
 
+async function sha256(path: string) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
 export class Workspace {
   readonly jobs = new Map<string, Job>();
   private controllers = new Map<string, { process: Controller; completion: Promise<void> }>();
@@ -47,13 +54,14 @@ export class Workspace {
     if (!UUID.test(sessionId)) throw new Error("Pi session must have a UUID");
     const parent = await directory(config.rootFolder);
     const root = await directory(join(parent, sessionId));
-    for (const name of ["scripts", "jobs", "logs"]) await directory(join(root, name));
+    for (const name of ["scripts", "jobs", "logs"]) await directory(await managedPath(root, name));
     const workspace = new Workspace(root, sessionId, config.npmRegistry);
-    if (!existsSync(join(root, "package.json"))) await writeFile(join(root, "package.json"), JSON.stringify({ private: true, type: "module" }, null, 2), { flag: "wx", mode: 0o600 });
+    const manifest = await managedPath(root, "package.json");
+    if (!existsSync(manifest)) await writeFile(manifest, JSON.stringify({ private: true, type: "module" }, null, 2), { flag: "wx", mode: 0o600 });
     await workspace.manifest();
-    for (const name of await readdir(join(root, "jobs"))) {
+    for (const name of await readdir(await managedPath(root, "jobs"))) {
       if (!UUID.test(name.slice(0, -5)) || !name.endsWith(".json")) continue;
-      const path = join(root, "jobs", name);
+      const path = await managedPath(root, "jobs", name);
       const info = await lstat(path);
       if (!info.isFile() || info.isSymbolicLink() || info.size > 64 * 1024) throw new Error("Job record must be a bounded regular file");
       const value: unknown = JSON.parse(await readFile(path, "utf8"));
@@ -62,9 +70,11 @@ export class Workspace {
         || !("scriptPath" in value) || typeof value.scriptPath !== "string" || !("args" in value) || !Array.isArray(value.args)
         || !value.args.every(arg => typeof arg === "string") || !("name" in value) || typeof value.name !== "string"
         || !("createdAt" in value) || typeof value.createdAt !== "number"
+        || ("scriptSha256AtStart" in value && (typeof value.scriptSha256AtStart !== "string" || !/^[0-9a-f]{64}$/u.test(value.scriptSha256AtStart)))
         || ("timeoutSeconds" in value && (typeof value.timeoutSeconds !== "number" || !Number.isFinite(value.timeoutSeconds) || value.timeoutSeconds <= 0))) throw new Error("Invalid node-scripts job record");
       // Identity and execution inputs are checked once at this persisted-data boundary.
       workspace.jobs.set(value.id, value as Job);
+      if (!inside(root, resolve(root, value.scriptPath))) throw new Error("Saved script path must stay inside this session workspace");
     }
     return workspace;
   }
@@ -73,14 +83,24 @@ export class Workspace {
   private changed() { for (const listener of this.listeners) listener(); }
   get active() { return this.controllers.size + this.launches.size; }
   private get(id: string) { if (!UUID.test(id)) throw new Error("Use the complete job UUID"); const job = this.jobs.get(id); if (!job) throw new Error("Unknown job in this session; use node_job_list"); return job; }
+  managedPath(...parts: string[]) { return managedPath(this.root, ...parts); }
   private save(job: Job): Promise<void> {
     const text = JSON.stringify(job, null, 2);
     const next = (this.writes.get(job.id) ?? Promise.resolve()).catch(() => {}).then(async () => {
-      const path = join(this.root, "jobs", `${job.id}.json`);
-      if ((await lstat(dirname(path))).isSymbolicLink()) throw new Error("Job record directory must not be a link");
-      const temporary = join(this.root, "jobs", `.${job.id}-${randomUUID()}.tmp`);
+      const path = await this.managedPath("jobs", `${job.id}.json`);
+      const temporary = await this.managedPath("jobs", `.${job.id}-${randomUUID()}.tmp`);
       await writeFile(temporary, text, { flag: "wx", mode: 0o600 });
-      await rename(temporary, path);
+      // Windows can briefly deny replacement while another reader opens the record.
+      const deadline = Date.now() + 2000;
+      for (;;) {
+        await this.managedPath("jobs", `${job.id}.json`);
+        try { await rename(temporary, path); break; }
+        catch (error) {
+          if (process.platform !== "win32" || Date.now() >= deadline || !(error instanceof Error) || !("code" in error)
+            || !["EPERM", "EBUSY"].includes(String(error.code))) throw error;
+          await new Promise(accept => setTimeout(accept, 25));
+        }
+      }
     });
     this.writes.set(job.id, next);
     return next;
@@ -95,11 +115,22 @@ export class Workspace {
   list(status: JobView["status"], recentN: number) { return listJobs(this.views(), status, recentN); }
   async query(id: string): Promise<Query> {
     const view = this.view(this.get(id));
-    const stdout = await tail(view.stdoutPath), stderr = await tail(view.stderrPath);
-    return { ...view, stdout: stdout.text, stderr: stderr.text, outputTruncated: stdout.truncated || stderr.truncated };
+    const stdout = await tail(await this.managedPath("logs", view.id, "stdout.log"));
+    const stderr = await tail(await this.managedPath("logs", view.id, "stderr.log"));
+    let sourceState: Query["sourceState"] = "not_recorded";
+    let scriptSha256Current: string | undefined;
+    if (view.scriptSha256AtStart) {
+      try {
+        scriptSha256Current = await sha256(await this.managedPath(view.scriptPath));
+        sourceState = scriptSha256Current === view.scriptSha256AtStart ? "same" : "changed";
+      } catch (error) {
+        sourceState = error instanceof Error && "code" in error && error.code === "ENOENT" ? "missing" : "unreadable";
+      }
+    }
+    return { ...view, sourceState, scriptSha256Current, stdout: stdout.text, stderr: stderr.text, outputTruncated: stdout.truncated || stderr.truncated };
   }
   async manifest(): Promise<{ private: true; type: "module"; dependencies?: Record<string, string> }> {
-    const path = join(this.root, "package.json");
+    const path = await this.managedPath("package.json");
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || info.size > 256 * 1024) throw new Error("Workspace ESM manifest must be a bounded regular file");
     const value: unknown = JSON.parse(await readFile(path, "utf8"));
@@ -109,7 +140,7 @@ export class Workspace {
     return value as { private: true; type: "module"; dependencies?: Record<string, string> };
   }
   private async script(path: string) {
-    const full = resolve(this.root, path);
+    const full = await this.managedPath(path);
     if (!inside(this.root, full) || !full.endsWith(".mjs")) throw new Error("Script must be a .mjs file inside this session workspace");
     const canonical = await realpath(full);
     const info = await lstat(full);
@@ -139,9 +170,13 @@ export class Workspace {
     try {
       await this.save(job);
       const script = await this.script(job.scriptPath);
-      const log = await directory(join(this.root, "logs", job.id));
+      const log = await directory(await this.managedPath("logs", job.id));
+      const stdoutPath = await this.managedPath("logs", job.id, "stdout.log");
+      const stderrPath = await this.managedPath("logs", job.id, "stderr.log");
+      job.scriptSha256AtStart = await sha256(script);
+      await this.save(job);
       controller = startProcess({ args: [script, ...job.args], cwd: this.root, timeoutSeconds: job.timeoutSeconds,
-        stdoutPath: join(log, "stdout.log"), stderrPath: join(log, "stderr.log"), onOutput: (text, stream) => {
+        stdoutPath, stderrPath, onOutput: (text, stream) => {
           const lines = (partial[stream] + text).split(/\r\n|\r|\n/u);
           partial[stream] = (lines.at(-1) ?? "").slice(-500);
           const nonempty = lines.filter(line => line.trim()).at(-1);
@@ -187,7 +222,10 @@ export class Workspace {
     const active = this.controllers.get(id);
     if (active) { await active.process.deprecate(); await active.completion; }
     if (job.terminationConfirmed === false || job.status === "started" && !active) throw new Error("Cannot confirm this process is stopped; no saved PID will be killed");
-    if (job.status !== "deprecated") { job.previousStatus = job.status; job.status = "deprecated"; await this.save(job); this.changed(); }
+    if (job.status !== "deprecated") {
+      const deprecated = { ...job, previousStatus: job.status, status: "deprecated" as const };
+      await this.save(deprecated); Object.assign(job, deprecated); this.changed();
+    }
     return this.query(id);
   }
   async interruptTimed() { await Promise.all([...this.jobs.values()].filter(job => job.status === "started" && job.timeoutSeconds !== undefined).map(job => this.deprecate(job.id))); }
@@ -203,6 +241,8 @@ export async function sessionWorkspace(config: Config, sessionId: string) {
   const existing = workspaces.get(sessionId);
   if (existing) {
     const value = await existing;
+    // Reload keeps owned processes but uses this extension version's workspace methods.
+    Object.setPrototypeOf(value, Workspace.prototype);
     const canonical = existsSync(root) ? await realpath(root) : root;
     if (dirname(value.root) === canonical) { value.registry = config.npmRegistry; return value; }
     if (value.active || value.dependencyBusy) throw new Error("Cannot change rootFolder while work is running");
@@ -213,5 +253,7 @@ export async function sessionWorkspace(config: Config, sessionId: string) {
 }
 
 export async function retainedWorkspace(sessionId: string): Promise<Workspace | undefined> {
-  return workspaces.get(sessionId)?.catch(() => undefined);
+  const value = await workspaces.get(sessionId)?.catch(() => undefined);
+  if (value) Object.setPrototypeOf(value, Workspace.prototype);
+  return value;
 }
