@@ -2,7 +2,7 @@
 
 A small Node.js runner for Pi. Each Pi session has one ESM workspace for scripts, npm dependencies, job definitions, and logs.
 
-When enabled, this extension blocks agent-issued native Bash and PowerShell calls. It does not replace Pi's file editor or reader.
+When enabled, this extension blocks direct native Bash and PowerShell tool calls, not interpreters launched by Node jobs.
 It adds `rm` and `mkdir`, so routine file deletion and directory creation do not need a script.
 
 ## Start here
@@ -10,8 +10,8 @@ It adds `rm` and `mkdir`, so routine file deletion and directory creation do not
 A job is a saved execution definition. Creating a job does not run it.
 
 ```text
-Discover workspace     Author a .mjs file       Create job         Run once
-node_job_list      -->  available file tools --> node_job_create --> node_job_run
+Inspect project commands    Reuse or author .mjs launcher    Create job         Run once
+native file tools      -->  existing code first          --> node_job_create --> node_job_run
                                                                      |
                                      +-------------------------------+-------------------+
                                      |                                                   |
@@ -66,9 +66,36 @@ To execute the script again, create another job. The script file can be reused; 
 
 ## Reuse and source identity
 
-Before creating another script, inspect existing workspace helpers. Prefer arguments and focused edits when an existing script fits.
+Inspect the project's instructions and existing commands before writing automation.
+Prefer suitable project scripts, then existing workspace helpers, then new automation.
+Run working Python, PowerShell, Bash, and other project commands unchanged; do not translate them into JavaScript.
+The `.mjs` requirement applies only to the Node entry file. Existing child processes retain their original language and project contract.
+
+For new one-off automation, prefer Node APIs over newly embedded shell or Python programs.
+Keep launchers small. Use arguments and focused edits when an existing helper fits; do not extract helpers solely to avoid small duplication.
 For example, create another job for `scripts/hello.mjs` with `"args": ["world"]`; do not copy the script.
-Use relative ESM imports for useful shared helpers. Do not extract helpers solely to avoid small duplication.
+
+### Launch an existing project program
+
+This example belongs in a workspace `.mjs` entry, not in the project source:
+
+```js
+import { spawn } from "node:child_process";
+
+const child = spawn("python", ["scripts/check.py", ...process.argv.slice(2)], {
+  cwd: "C:/src/example-project",
+  shell: false,
+  windowsHide: true,
+  stdio: "inherit",
+});
+child.once("error", error => { console.error(error.code ?? "SPAWN_FAILED"); process.exitCode = 1; });
+child.once("exit", (code, signal) => { if (signal) console.error(signal); process.exitCode = code ?? 1; });
+```
+
+Use the project's documented interpreter and working directory. Unix projects may require `python3` or a virtual-environment executable.
+For an existing PowerShell file, the same pattern can launch `pwsh` with `["-NoProfile", "-File", "scripts/check.ps1", ...args]`.
+Existing Bash scripts can use their documented Bash interpreter. Do not silently add execution-policy bypasses, elevation, or approval suppression.
+Use a package manager's documented entry point when the command is a Windows `.cmd` shim; `shell: false` cannot launch every shim directly.
 
 The runner records `scriptSha256AtStart` from the entry file's exact bytes immediately before launch.
 It saves the digest in the job record, not a source snapshot. Later edits or deletion leave the execution evidence intact.
@@ -240,8 +267,10 @@ current session jobs
 ```
 
 These timestamps are fallbacks, not separate priority groups. A silent job started at 12:05 ranks above output last seen at 12:01.
-Rows include full UUID, name, status, type, and activity time with its source. `total` and `hasMore` identify omitted matches.
+Rows include full UUID, name, `scriptPath`, status, type, and activity time with its source. `total` and `hasMore` identify omitted matches.
 There is no pagination, wildcard status, or implicit default. Querying, listing, redraws, and reload never update recency.
+Use native `ls`/`find` to discover source files. Use `node_job_list` to recover job IDs, script paths, or prior execution history.
+When the UUID is known, query it directly. Do not rerun work merely to recover a result, or list before every job.
 
 The panel uses this same recency comparator, but combines statuses and puts all known running jobs first.
 Quiet background workers cannot be displaced by newer created or terminal jobs. Timed and background jobs have equal running priority.
@@ -315,6 +344,28 @@ Arbitrary scripts and existing programs have normal OS permissions. This is work
 Detached descendants and cross-OS process trees are outside the termination guarantee. Windows and POSIX use different tree-termination mechanisms.
 Full logs and indefinite services can consume unbounded disk space. There is no automatic collector or expiry policy.
 
+## Native tools and resumed sessions
+
+This configuration uses exactly six built-in tools by default; extension tools remain available:
+
+```json
+"defaultTools": ["read", "edit", "write", "grep", "find", "ls"]
+```
+
+node-scripts preserves the active native file tools. It does not activate missing tools or overwrite another extension's selection.
+Project settings and CLI options can override these defaults.
+
+Pi 1.5.1 restores a resumed session's recorded tool selection. Changing defaults alone does not repair that selection.
+`/reload` adds newly configured defaults, but does not remove previously active tools or re-enable unchanged defaults.
+To correct an affected session once, resume it with modifiers:
+
+```text
+pi --no-mcp --resume --tools +read,+edit,+write,+grep,+find,+ls,-bash,-powershell
+```
+
+The modifiers preserve extension tools. After the next model request, Pi records the corrected selection in the session.
+Do not use a plain `--tools read,edit,...` allowlist here; it can exclude extension tools.
+
 ## Replacement and verification
 
 This replaces the `temp-scripts` extension; it does not migrate or delete `~/.pi-temp-scripts` data.
@@ -326,6 +377,7 @@ Commands run from the global agent directory:
 node --test extensions/node-scripts/node-scripts.test.ts
 node extensions/node-scripts/verify-integration.ts <installed-pi-package-directory>
 node extensions/node-scripts/verify-live.ts <installed-pi-package-directory>
+node extensions/node-scripts/verify-reuse-live.ts <installed-pi-package-directory>
 node extensions/node-scripts/verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>
 node scripts/verify-extensions.ts <installed-pi-package-directory> offline
 ```
@@ -334,6 +386,10 @@ Offline checks use real Node processes and isolated Pi sessions. They do not mak
 Live checks use the configured provider, model, reasoning level, and authentication. Real requests and npm downloads can incur charges.
 The live verifier runs twelve two-part work cycles with quiet and sustained-output services.
 It also tests three native compactions, reloads, saved-session reopening, dependency protection, and deprecation.
+The separate reuse verifier gives outcome-only requests for an existing project program, a second input, and prior execution evidence.
+It checks real invocation receipts, unchanged project source, launcher reuse, and list/query recovery without another execution.
+Python uses `NODE_SCRIPTS_TEST_PYTHON` or the platform default. Set `NODE_SCRIPTS_TEST_POWERSHELL` only when PowerShell execution is authorized.
+The unit and reuse-live checks report unrun PowerShell coverage explicitly when that variable is unset.
 Expect several minutes; provider speed and compaction time affect duration. The final result reports time and prompt/request/tool counts.
 Verifiers preserve fixture evidence when process termination remains uncertain.
 Terminal checks use an existing terminal driver; the runtime extension has no third-party dependency beyond Pi's supplied APIs.

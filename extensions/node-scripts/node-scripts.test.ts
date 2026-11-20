@@ -10,6 +10,7 @@ import { Workspace, sessionWorkspace } from "./workspace.ts";
 import { jobActivity, listJobs, panelJobs, type Job, type JobView } from "./types.ts";
 import { dependencies } from "./npm.ts";
 import { managedTree } from "./paths.ts";
+import { launcherSource, projectFixture } from "./project-fixtures.ts";
 
 async function fixture(action: (store: Workspace, root: string) => Promise<void>) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "node-scripts-unit-")));
@@ -96,6 +97,35 @@ test("workspace .mjs entries use ESM and other entry extensions reject", async (
     await assert.rejects(Workspace.create({ rootFolder: join(store.root, ".."), npmRegistry: store.registry }, store.sessionId), /ESM/u);
   });
 });
+
+for (const language of ["python", "powershell"] as const) {
+  const executable = language === "python" ? process.env.NODE_SCRIPTS_TEST_PYTHON ?? (process.platform === "win32" ? "python" : "python3")
+    : process.env.NODE_SCRIPTS_TEST_POWERSHELL;
+  test(`thin Node launchers reuse existing ${language} programs and preserve process contracts`, { skip: executable ? false : "Set NODE_SCRIPTS_TEST_POWERSHELL to an authorized interpreter path" }, async () => {
+    assert(executable);
+    await fixture(async (store, root) => {
+      const project = await projectFixture(root, language, executable);
+      const scriptPath = join(store.root, "scripts", "launch.mjs");
+      await writeFile(scriptPath, launcherSource(project));
+      const previous = process.env.NODE_REUSE_MARKER;
+      process.env.NODE_REUSE_MARKER = "inherited-test-value";
+      try {
+        for (const [input, exit] of [["alpha", 0], ["beta", 0], ["failure", 7]] as const) {
+          const definition = await store.createJob({ scriptPath, args: [input], timeoutSeconds: 10 });
+          const output = await store.run(definition.id);
+          assert.equal(output.exitCode, exit, output.stderr);
+          assert.equal(output.status, exit === 0 ? "finished" : "failed");
+          assert(output.stderr.includes("PROJECT_STDERR"));
+          const value = JSON.parse(output.stdout) as { case: string; cwd: string; marker: string };
+          assert.equal(value.case, input); assert.equal(value.cwd, project.project); assert.equal(value.marker, "inherited-test-value");
+          assert(output.terminationConfirmed);
+        }
+        assert.equal(await readFile(project.script, "utf8"), project.source);
+        assert.equal((await readFile(project.receipt, "utf8")).trim().split("\n").length, 3);
+      } finally { if (previous === undefined) delete process.env.NODE_REUSE_MARKER; else process.env.NODE_REUSE_MARKER = previous; }
+    });
+  });
+}
 
 test("background work returns at startup, survives same-process reload, and deprecates without deleting evidence", async () => {
   await fixture(async store => {

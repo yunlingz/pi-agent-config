@@ -71,7 +71,9 @@ Timed jobs wait for a result; indefinite background jobs return after startup an
 The agent queries status when needed. There are no proactive callbacks, source snapshots, or automatic log cleanup.
 Script files remain reusable and editable. Jobs retain their launch SHA-256; queries report whether the current entry changed or disappeared.
 Managed files stay within the session workspace. The compact panel uses aligned columns and todo-style rows; expansion shows execution evidence.
-When enabled, it blocks agent-issued Bash and PowerShell calls; manual user shell commands remain unchanged.
+The six default built-in tools are `read`, `edit`, `write`, `grep`, `find`, and `ls`; extension tools remain available.
+Direct Bash and PowerShell tool calls are blocked while node-scripts is on. Node launchers can reuse existing project interpreters and scripts unchanged.
+Older resumed sessions may need a [one-time tool-selection correction](extensions/node-scripts/README.md#native-tools-and-resumed-sessions).
 `/node-scripts on|off|status|expand|collapse` controls the branch preference and panel.
 Powerline displays exactly `node-scripts: on`, `node-scripts: off`, or `node-scripts: error`.
 [`pi-node-scripts.json`](pi-node-scripts.json) and its [schema](pi-node-scripts.schema.json) configure the workspace root and npm registry.

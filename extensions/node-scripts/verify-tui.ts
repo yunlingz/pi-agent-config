@@ -27,7 +27,7 @@ try {
   const extension = dirname(fileURLToPath(import.meta.url));
   await symlink(extension, join(agent, "extensions", "node-scripts"), process.platform === "win32" ? "junction" : "dir");
   await writeFile(join(agent, "pi-node-scripts.json"), JSON.stringify({ rootFolder: join(root, "workspaces"), npmRegistry: "https://packagefeedproxy.microsoft.io/npm/" }));
-  await writeFile(join(agent, "settings.json"), JSON.stringify({ packages: [resolve(footerDirectory)], extensions: ["-builtin:mcp"], defaultProvider: "node-terminal-fixture", defaultModel: "fixture", quietStartup: true, retry: { enabled: false }, cacheWarming: "off", compaction: { enabled: false, keepRecentTokens: 0 }, powerline: { welcome: false, autoFollowUp: false, git: { polling: "off" }, customItems: [{ id: "node_scripts", statusKey: "node-scripts", position: "left", color: "muted" }], layout: { left: ["custom:node_scripts", "path"], right: [] } } }));
+  await writeFile(join(agent, "settings.json"), JSON.stringify({ packages: [resolve(footerDirectory)], extensions: ["-builtin:mcp"], defaultTools: ["read", "edit", "write", "grep", "find", "ls"], defaultProvider: "node-terminal-fixture", defaultModel: "fixture", quietStartup: true, retry: { enabled: false }, cacheWarming: "off", compaction: { enabled: false, keepRecentTokens: 0 }, powerline: { welcome: false, autoFollowUp: false, git: { polling: "off" }, customItems: [{ id: "node_scripts", statusKey: "node-scripts", position: "left", color: "muted" }], layout: { left: ["custom:node_scripts", "path"], right: [] } } }));
   const info = JSON.parse(await readFile(join(installation, "package.json"), "utf8")) as { bin: { pi: string } };
   terminal = pty.spawn(process.execPath, [resolve(installation, info.bin.pi), "--offline", "--no-mcp", "--no-approve", "--no-skills", "--no-context-files", "--no-themes", "--no-prompt-templates", "--extension", join(extension, "tui-fixture.ts"), "--tui-mode", "fullscreen"], {
     cols: 120, rows: 44, cwd: project, name: "xterm-256color", env: { ...process.env, PI_CODING_AGENT_DIR: agent, NODE_SCRIPTS_TUI_ROOT: root, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PI_PROGRAM_STATUS: "0", TERM: "xterm-256color", COLORTERM: "truecolor" },
@@ -107,8 +107,9 @@ try {
   await prompt("Run a background service.");
   const replaced = await latest("Terminal service");
   const startsBeforeNew = await count("start");
-  child.write("/new\r");
+  output = ""; child.write("/new\r");
   await wait("new session deprecates the old background process", async () => await count("start") > startsBeforeNew);
+  await wait("native new-session transition complete", () => visible().includes("New session started") && /node-scripts:\s*on/u.test(visible()));
   assert.equal((await persisted(replaced)).status, "deprecated");
   assert.equal((await persisted(replaced)).terminationConfirmed, true);
   assert(existsSync(replaced.stdoutPath));

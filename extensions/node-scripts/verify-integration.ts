@@ -35,12 +35,13 @@ const statuses = new Map<string, string>();
 const notifications: string[] = [];
 let summaryRequests = 0;
 let providerPrompt = "";
+const nativeTools = ["read", "edit", "write", "grep", "find", "ls"];
 try {
   globalThis.fetch = async () => { network++; throw new Error("External requests blocked in offline node-scripts fixtures"); };
   await mkdir(join(root, "extensions"));
   await symlink(dirname(fileURLToPath(import.meta.url)), join(root, "extensions", "node-scripts"), process.platform === "win32" ? "junction" : "dir");
   await writeFile(join(root, "pi-node-scripts.json"), JSON.stringify({ rootFolder: join(root, "workspaces"), npmRegistry: "https://packagefeedproxy.microsoft.io/npm/" }));
-  const settings = sdk.SettingsManager.inMemory({ packages: [], extensions: ["-builtin:mcp"], compaction: { enabled: false, keepRecentTokens: 300, reserveTokens: 1000 }, retry: { enabled: false } });
+  const settings = sdk.SettingsManager.inMemory({ packages: [], extensions: ["-builtin:mcp"], defaultTools: nativeTools, compaction: { enabled: false, keepRecentTokens: 300, reserveTokens: 1000 }, retry: { enabled: false } });
   const runtime = await sdk.ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, modelsStorePath: join(root, "models-store.json"), allowModelNetwork: false, refreshOnCreate: false });
   runtime.registerProvider("node-scripts-fixture", {
     api: "node-scripts-fixture", apiKey: "unused", baseUrl: "http://127.0.0.1:1",
@@ -60,7 +61,7 @@ try {
   let shellRuns = 0;
   const loader = new sdk.DefaultResourceLoader({ cwd: root, agentDir: root, settingsManager: settings, disabledBuiltinExtensions: ["mcp"], noSkills: true, noThemes: true, noContextFiles: true, noPromptTemplates: true,
     extensionFactories: [pi => {
-      pi.registerTool({ name: "powershell", label: "Fixture PowerShell", description: "Must never execute", parameters: Type.Object({ command: Type.String() }), async execute() { shellRuns++; throw new Error("Shell fixture executed"); } });
+      pi.registerTool({ name: "powershell", label: "Fixture PowerShell", description: "Must never execute", defaultActive: false, parameters: Type.Object({ command: Type.String() }), async execute() { shellRuns++; throw new Error("Shell fixture executed"); } });
       pi.registerTool({ name: "nested_shell_probe", label: "Nested probe", description: "Probe native shell gates", parameters: Type.Object({}), async execute(_id, _input, signal, _update, ctx) {
         assert((await ctx.executeTool("bash", { command: "git --version" }, { signal })).isError);
         assert((await ctx.executeTool("powershell", { command: "Get-Location" }, { signal })).isError);
@@ -103,7 +104,9 @@ try {
   const checkPrompt = () => {
     assert(!providerPrompt.includes("<node_scripts_workspace>"));
     assert.equal(providerPrompt.split(`Current node-scripts workspace: ${workspace}.`).length - 1, 1);
-    assert(providerPrompt.includes("Before creating another node-scripts script, check existing workspace scripts"));
+    assert(providerPrompt.includes("Prefer suitable project scripts, then workspace helpers, then new automation"));
+    assert(providerPrompt.includes("existing Python, PowerShell, Bash"));
+    assert(!providerPrompt.includes("Do not invoke PowerShell through node-scripts"));
   };
   const details = <T>(value: { details?: unknown }) => value.details as T; // Extension-owned controlled tool result.
   const create = async (scriptPath: string, timeoutSeconds?: number, name?: string) => details<JobView>(await execute("node_job_create", { scriptPath, ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }), ...(name ? { name } : {}) }));
@@ -121,11 +124,20 @@ try {
   checkPrompt();
   const guidelines = session.getAllTools().find(tool => tool.name === "node_job_create")?.promptGuidelines;
   assert(guidelines?.some(line => line.includes(workspace)));
+  assert(nativeTools.every(name => session?.getActiveToolNames().includes(name)));
+  assert(!session.getActiveToolNames().includes("bash") && !session.getActiveToolNames().includes("powershell"));
+  await writeFile(join(root, "native-marker.txt"), "NATIVE_DISCOVERY_OK\n");
+  await execute("grep", { pattern: "NATIVE_DISCOVERY_OK", path: join(root, "native-marker.txt") });
+  await execute("find", { pattern: "native-marker.txt", path: root });
+  await execute("ls", { path: root });
   const invalidLists: ToolCall["arguments"][] = [{}, { status: "created" }, { recentN: 10 }, { status: "all", recentN: 10 }, { status: "created", recentN: 0 }];
   for (const args of invalidLists) await execute("node_job_list", args, true);
+  // Explicitly activate shells only in this isolated fixture to exercise the tool_call gate.
+  session.setActiveToolsByName([...session.getActiveToolNames(), "bash", "powershell"]);
   await execute("bash", { command: "git --version" }, true);
   await execute("powershell", { command: "Get-Location" }, true);
   await execute("nested_shell_probe", {}); assert.equal(shellRuns, 0);
+  session.setActiveToolsByName(session.getActiveToolNames().filter(name => name !== "bash" && name !== "powershell"));
   await execute("mkdir", { path: join(workspace, "scripts", "nested") });
   await execute("write", { path: join(workspace, "scripts", "main.mjs"), content: 'console.log("BEFORE");console.error("ERR");' });
   await execute("read", { path: join(workspace, "scripts", "main.mjs") });
@@ -237,9 +249,11 @@ try {
 
   const ids: string[] = [];
   for (let index = 0; index < 12; index++) ids.push((await create("scripts/main.mjs", 5, `Visible job ${index}${index === 11 ? " 界😀é" : ""}`)).id);
-  const listed = details<{ jobs: JobView[]; total: number; hasMore: boolean }>(await execute("node_job_list", { status: "created", recentN: 10 }));
+  const listed = details<{ jobs: (Pick<JobView, "id" | "name" | "scriptPath">)[]; total: number; hasMore: boolean }>(await execute("node_job_list", { status: "created", recentN: 10 }));
   assert.equal(listed.jobs.length, 10); assert.equal(listed.total, 12);
   assert(listed.hasMore);
+  assert(listed.jobs.every(job => job.scriptPath === one.scriptPath));
+  assert(listed.jobs.every(job => Object.keys(job).sort().join(",") === "activity,id,name,scriptPath,status,type"));
   assert((widget.get("node-scripts-jobs")?.render(180).length ?? 0) <= 10);
   const names = listed.jobs.slice(0, 8).map(job => job.name);
   for (const name of names) assert(panel().includes(name));
@@ -256,14 +270,41 @@ try {
   for (const id of ids) await execute("node_job_deprecate", { jobId: id });
   await session.prompt("/node-scripts off"); assert.equal(statuses.get("node-scripts"), "node-scripts: off");
   assert(!session.getActiveToolNames().includes("node_job_create"));
-  assert.match((await execute("bash", { command: "git --version" })).content.filter(block => block.type === "text").map(block => block.text).join(""), /git version/u);
+  await execute("grep", { pattern: "NATIVE_DISCOVERY_OK", path: join(root, "native-marker.txt") });
   assert(!providerPrompt.includes("Current node-scripts workspace:"));
-  assert(!providerPrompt.includes("Before creating another node-scripts script"));
+  assert(!providerPrompt.includes("Before creating a node-scripts launcher"));
   await session.reload(); assert(!session.getActiveToolNames().includes("node_job_create"));
   await session.prompt("/node-scripts on"); assert(session.getActiveToolNames().includes("node_job_create"));
   await execute("node_job_list", { status: "finished", recentN: 10 }); checkPrompt();
+  assert(nativeTools.every(name => session?.getActiveToolNames().includes(name)));
+  session.setActiveToolsByName([...session.getActiveToolNames().filter(name => !["grep", "find", "ls"].includes(name)), "bash", "powershell"]);
+  await session.prompt("Persist the old fixture tool selection."); await session.waitForIdle();
+  const saved = manager.getSessionFile(); assert(saved);
+  await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); session = undefined;
+  const reopen = async (tools?: string[]) => {
+    await loader.reload();
+    const restored = await sdk.createAgentSession({ cwd: root, agentDir: root, settingsManager: settings, modelRuntime: runtime, model,
+      resourceLoader: loader, sessionManager: sdk.SessionManager.open(saved), ...(tools ? { tools } : {}) });
+    await restored.session.bindExtensions({ mode: "json", onError: error => errors.push(error) });
+    return restored.session;
+  };
+  session = await reopen();
+  assert(["grep", "find", "ls"].every(name => !session?.getActiveToolNames().includes(name)), "Defaults alone do not repair an old transcript");
+  await session.reload();
+  assert(!session.getActiveToolNames().includes("grep"));
+  await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); session = undefined;
+  const args: typeof import("@earendil-works/pi-coding-agent/dist/cli/args.js") = await import(pathToFileURL(join(installation, "dist/cli/args.js")).href);
+  const selected = args.parseArgs(["--no-mcp", "--resume", "--tools", "+read,+edit,+write,+grep,+find,+ls,-bash,-powershell"]);
+  session = await reopen(selected.tools);
+  assert(nativeTools.every(name => session?.getActiveToolNames().includes(name)));
+  assert(["bash", "powershell"].every(name => !session?.getActiveToolNames().includes(name)));
+  assert(session.getActiveToolNames().includes("node_job_list"), "Modifiers preserve extension tools");
+  await execute("node_job_list", { status: "finished", recentN: 1 });
+  await session.reload();
+  assert(nativeTools.every(name => session?.getActiveToolNames().includes(name)));
+  assert(!session.getActiveToolNames().includes("bash"));
   assert.deepEqual(errors, []); assert.equal(network, 0);
-  console.log("PASS: automatic discovery; nine tools; native file tools; direct/nested shell gates; filesystem safety; single-use and deprecation; shared panel/list ranking; streaming and retained logs; timed interruption before native compaction; Escape/reload; background PID continuity across manual/automatic compaction/reload; no callbacks; toggle; narrow layouts; zero external requests");
+  console.log("PASS: automatic discovery; nine tools; six native file tools; direct/nested shell gates; project-first interpreter guidance; list script paths; native resume-modifier correction preserving extensions and reload; filesystem safety; single-use/deprecation; panel/list ranking; streaming/retained logs; timed interruption before compaction; Escape/reload; background PID continuity across manual/automatic compaction/reload; no callbacks; toggle; narrow layouts; zero external requests");
 } finally {
   try { if (session) { await session.abort(); await session.waitForIdle(); await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); } }
   finally {

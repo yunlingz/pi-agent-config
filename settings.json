@@ -4,9 +4,12 @@
   "defaultModel": "gpt-6.1-sol",
   "transport": "sse",
   "defaultTools": [
-    "+grep",
-    "+find",
-    "+ls"
+    "read",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
   ],
   "enabledModels": [
     "existing_gateway/gpt-6-astra",

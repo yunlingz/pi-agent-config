@@ -68,7 +68,7 @@ export default function nodeScripts(pi: ExtensionAPI) {
     if (!enabled) {
       if (TOOLS.includes(event.toolName)) return { block: true, reason: "node-scripts is off; use /node-scripts on" };
     } else if (event.toolName === "bash" || event.toolName === "powershell") {
-      return { block: true, reason: "Agent-issued Bash and PowerShell are blocked while node-scripts is enabled. Node jobs provide execution; native file tools remain unchanged. Do not retry through another shell." };
+      return { block: true, reason: "Direct Bash and PowerShell tool calls are blocked while node-scripts is enabled. Use native file tools for file work. Node jobs can launch existing authorized project scripts in their original language." };
     }
   });
 
@@ -88,15 +88,17 @@ export default function nodeScripts(pi: ExtensionAPI) {
   function registerTools() {
     const guidance = [
       `Current node-scripts workspace: ${workspace?.root ?? "unavailable; check /node-scripts status"}.`,
-      "node-scripts replaces agent-issued Bash and PowerShell execution, not normal file authoring. Scripts have normal OS permissions, not a sandbox.",
+      "node-scripts replaces direct Bash and PowerShell tool calls, not native file tools or existing project programs. Scripts are not sandboxed.",
       "node-scripts workspace scripts must use .mjs files and ESM syntax, with explicit .mjs extensions in relative imports.",
       "The node-scripts workspace package.json must retain private:true and type:module. These conventions do not apply to unrelated projects or installed packages.",
-      "Only node-scripts jobs are single-use; script files can be reused, edited, or deleted after execution.",
-      "Before creating another node-scripts script, check existing workspace scripts for suitable code. Prefer focused edits and arguments when a script fits.",
-      "Reuse node-scripts helpers through relative ESM imports when useful; do not extract helpers solely to avoid small duplication.",
+      "Before creating a node-scripts launcher, inspect relevant project instructions and existing commands. Prefer suitable project scripts, then workspace helpers, then new automation.",
+      "Node jobs can launch existing Python, PowerShell, Bash, and other project commands unchanged, including their documented child processes.",
+      "The .mjs requirement applies only to node-scripts job entries, not child programs. Do not translate working project scripts into JavaScript.",
+      "For new one-off automation, prefer Node APIs over newly embedded shell or Python programs. Keep existing-command launchers small.",
+      "Only node-scripts jobs are single-use; reuse script files through arguments, focused edits, or useful relative ESM imports.",
       "Later node-scripts source edits or deletion do not change retained execution evidence.",
       "Keep node-scripts source and dependency mutations separate from running jobs. Logs persist; do not print credentials or secrets.",
-      "Do not invoke PowerShell through node-scripts, including pwsh, powershell.exe and .ps1 scripts.",
+      "Node launchers must preserve project authorization, interpreter policy, working directory, output, and failure status; do not bypass approval or execution policy.",
     ];
     pi.registerTool({ name: "node_job_create", label: "Create Node job", description: "Create an immutable single-use job for an existing .mjs script inside the current session workspace. The script remains editable and reusable. Does not execute it. Returns the complete UUID and definition.", promptSnippet: "Define a Node script job", promptGuidelines: guidance,
       parameters: Type.Object({ scriptPath: Type.String(), args: Type.Optional(Type.Array(Type.String())), timeoutSeconds: Type.Optional(Type.Union([Type.Number({ exclusiveMinimum: 0, maximum: 2147483 }), Type.Null()], { description: "Positive seconds for timed foreground execution. Omit or set null for indefinite background execution. Do not substitute a large timeout for no timeout." })), name: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) }), executionMode: "sequential", ...renderers("Create Node job"),
@@ -122,14 +124,18 @@ export default function nodeScripts(pi: ExtensionAPI) {
       parameters: idSchema, executionMode: "parallel", ...renderers("Query Node job", id => workspace?.jobs.get(id)?.name),
       async execute(_id, input) { const job = await required().query(input.jobId); return result(queryText(job), job); },
     });
-    pi.registerTool({ name: "node_job_list", label: "List Node jobs", description: "Return the current workspace path and recent jobs of exactly one required status. recentN is required (1–100). Sort by last nonempty output time, otherwise start time, otherwise creation time; queries never change order. Returns full UUID/name/status/type/activity, matching count and hasMore. No output tails.", promptSnippet: "Discover the workspace and recent jobs for one status",
-      promptGuidelines: ["node_job_list returns the current workspace path even when empty, and recovers complete job UUIDs. Avoid internal-record reads and separate polling helpers."],
+    pi.registerTool({ name: "node_job_list", label: "List Node jobs", description: "Return the current workspace path and recent jobs of exactly one required status. recentN is required (1–100). Sort by last nonempty output time, otherwise start time, otherwise creation time; queries never change order. Returns full UUID/name/scriptPath/status/type/activity, matching count and hasMore. No arguments or output tails.", promptSnippet: "Discover recent jobs and their script paths for one status",
+      promptGuidelines: [
+        "Use native ls/find to discover reusable source files. Use node_job_list to recover prior job IDs, script paths, or execution history when needed.",
+        "Use node_job_query for a known job's evidence instead of rerunning it. No list call is required before every new job.",
+        "node_job_list returns the workspace path even when empty. Avoid reading internal job records or writing separate polling helpers.",
+      ],
       parameters: Type.Object({ status: Type.Union([Type.Literal("created"), Type.Literal("started"), Type.Literal("finished"), Type.Literal("failed"), Type.Literal("timeout"), Type.Literal("deprecated"), Type.Literal("unconfirmed")]), recentN: Type.Integer({ minimum: 1, maximum: 100 }) }), executionMode: "parallel", ...renderers("List Node jobs"),
       async execute(_id, input) {
         const store = required();
         const selected = store.list(input.status, input.recentN);
-        const jobs = selected.jobs.map(job => ({ id: job.id, name: job.name, status: job.status, type: mode(job), activity: jobActivity(job) }));
-        return result(`Workspace: ${store.root}\nStatus: ${input.status}\n${jobs.map(job => `${job.id} | ${job.name} | ${job.status} | ${job.type} | ${job.activity.source}: ${new Date(job.activity.at).toISOString()}`).join("\n")}\nShowing ${jobs.length} of ${selected.total}; hasMore: ${selected.hasMore}.`, { workspace: store.root, status: input.status, recentN: input.recentN, jobs, total: selected.total, hasMore: selected.hasMore });
+        const jobs = selected.jobs.map(job => ({ id: job.id, name: job.name, scriptPath: job.scriptPath, status: job.status, type: mode(job), activity: jobActivity(job) }));
+        return result(`Workspace: ${store.root}\nStatus: ${input.status}\n${jobs.map(job => `${job.id} | ${job.name} | ${job.scriptPath} | ${job.status} | ${job.type} | ${job.activity.source}: ${new Date(job.activity.at).toISOString()}`).join("\n")}\nShowing ${jobs.length} of ${selected.total}; hasMore: ${selected.hasMore}.`, { workspace: store.root, status: input.status, recentN: input.recentN, jobs, total: selected.total, hasMore: selected.hasMore });
       },
     });
     for (const action of ["add", "remove"] as const) pi.registerTool({ name: `node_npm_${action}`, label: `npm ${action}`, description: `${action === "add" ? "Install an exact-version production dependency" : "Remove a direct dependency"} in the session workspace using its configured registry. Lifecycle scripts disabled, logs retained, no automatic upgrades. Reject while jobs run; operation deadline 120s.`, promptSnippet: `${action === "add" ? "Add" : "Remove"} session-workspace npm dependencies`,

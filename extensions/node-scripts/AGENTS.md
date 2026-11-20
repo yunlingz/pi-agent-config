@@ -10,6 +10,7 @@
 - Keep one shared recency comparator. Exact-status lists use it directly; the combined panel puts running jobs first.
 - Keep node_job_list status and recentN required. Keep the collapsed panel within ten physical lines.
 - Keep ESM and reuse guidance in standard tool registration. Do not inject a custom prompt section or prescribe authoring tools.
+- Prefer existing project scripts in their original language, then workspace helpers, then new automation. Keep direct shell-tool gates separate from subprocess policy.
 - Record entry SHA-256 before launch; compare current source only on query. Do not alter execution status or recency after source changes.
 - Check managed paths within the session's canonical workspace before I/O. Preserve general project scope for mkdir/rm.
 - Follow the installed todo plugin's visual conventions. Align columns by terminal width; keep metadata in expanded results.

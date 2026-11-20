@@ -56,13 +56,13 @@ export default function fixture(pi: ExtensionAPI) {
         if (results.length === 0) plan("node_job_list", { status: "started", recentN: 10 });
         else if (results.length === 1) {
           const job = details?.jobs?.find(value => value.status === "started");
-          assert(job); plan("node_job_deprecate", { jobId: job.id });
+          assert(job && job.scriptPath.endsWith(".mjs")); plan("node_job_deprecate", { jobId: job.id });
         }
       } else if (!summary && prompt.includes("source check")) {
         if (results.length === 0) plan("node_job_list", { status: "deprecated", recentN: 10 });
         else if (results.length === 1) {
           const job = details?.jobs?.find(value => value.name === "Terminal service");
-          assert(job); plan("node_job_query", { jobId: job.id });
+          assert(job && job.scriptPath.endsWith(".mjs")); plan("node_job_query", { jobId: job.id });
         }
       }
       const text = summary ? "Native terminal summary keeps background jobs and their workspace." : prompt.includes("history") ? "History fixture. ".repeat(1500) : "TERMINAL_DONE";
