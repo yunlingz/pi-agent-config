@@ -12,12 +12,14 @@ import { resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { testTUI, testUI } from "../../scripts/test-fixtures.ts";
 import { STATUS_KEY } from "./controls.ts";
 import type { GrammarManifest } from "./scripts/grammar-types.ts";
+import type { TObject, TObjectOptions, TSchemaOptions } from "typebox";
 
 const installation = process.argv[2];
 assert(installation, "Usage: node verify-integration.ts <installed-pi-package-directory>");
 const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(resolve(installation), "dist/index.js")).href);
 const require = createRequire(pathToFileURL(join(resolve(installation), "package.json")));
 const { Type }: typeof import("typebox") = await import(pathToFileURL(require.resolve("typebox")).href);
+const { Check }: typeof import("typebox/value") = await import(pathToFileURL(require.resolve("typebox/value")).href);
 const ai: typeof import("@earendil-works/pi-ai") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-ai", resolve(installation))).href);
 const temporary = await mkdtemp(join(tmpdir(), "code-anchor-integration-"));
 let session: AgentSession | undefined;
@@ -133,7 +135,7 @@ try {
     assert(tool);
     return [tool.description, ...(tool.promptGuidelines ?? [])].join("\n");
   };
-  assert.match(guidance("hashline_read"), /batch independent hashline_read calls/iu);
+  assert.match(guidance("hashline_read"), /multiple files.*separate hashline_read calls/iu);
   assert.match(guidance("hashline_read"), /omitted ranges/u);
   const searchGuidance = guidance("ast_grep");
   assert.match(searchGuidance, /Prefer Pi's built-in text-search tool \(grep\)/u);
@@ -164,6 +166,56 @@ try {
     }
   };
   assertGuidance(true);
+
+  phase = "checking all exposed parameter schemas and examples";
+  const invalidArguments: [string, ToolCall["arguments"]][] = [
+    ["hashline_read", {}], ["hashline_read", { path: "" }],
+    ["hashline_read", { paths: ["file.ts"] }], ["hashline_read", { path: "file.ts", extra: true }],
+    ["hashline_read", { path: "file.ts", offset: 0 }], ["hashline_read", { path: "file.ts", limit: "not-a-number" }],
+    ["hashline_edit", { input: "" }], ["hashline_edit", { input: "invalid", path: "file.ts" }],
+    ["ast_grep", { pat: "" }], ["ast_grep", { pat: "console.log($VALUE)", path: "" }],
+    ["ast_grep", { pat: "console.log($VALUE)", lang: "" }], ["ast_grep", { pat: "console.log($VALUE)", skip: -1 }],
+    ["ast_grep", { pat: "console.log($VALUE)", skip: "not-a-number" }], ["ast_grep", { pat: "console.log($VALUE)", paths: ["file.ts"] }],
+    ["ast_edit", { paths: ["file.ts"], ops: [] }], ["ast_edit", { paths: [], ops: [{ pat: "console.log($VALUE)", out: "" }] }],
+    ["ast_edit", { paths: [""], ops: [{ pat: "console.log($VALUE)", out: "" }] }],
+    ["ast_edit", { paths: ["file.ts"], ops: [{ pat: "", out: "" }] }],
+    ["ast_edit", { paths: ["file.ts"], ops: [{ pat: "console.log($VALUE)" }] }],
+    ["ast_edit", { paths: ["file.ts"], ops: [{ pat: "console.log($VALUE)", out: "", extra: true }] }],
+    ["write", { path: "", content: "" }], ["write", { path: "empty.txt" }], ["write", { path: "empty.txt", content: "", extra: true }],
+  ];
+  for (const name of [...codeAnchorNames, "write"]) {
+    const definition: ReturnType<AgentSession["getToolDefinition"]> = session.getToolDefinition(name);
+    assert(definition);
+    // Every registered tool here supplies a TypeBox object schema with field options.
+    const schema = definition.parameters as TObject<Record<string, TSchemaOptions>> & TObjectOptions;
+    assert.equal(schema.additionalProperties, false, `${name}: reject unknown fields`);
+    for (const property of Object.values(schema.properties)) assert(property.description, `${name}: describe every field`);
+  }
+  for (const [name, args] of invalidArguments) {
+    const definition = session.getToolDefinition(name);
+    assert(definition && !Check(definition.parameters, args), `${name}: invalid schema fixture unexpectedly passes`);
+    await assert.rejects(execute(name, args), `${name}: Pi must reject ${JSON.stringify(args)}`);
+  }
+  assert.equal(await readFile(file, "utf8"), "console.log(answer);\r\n");
+  const literalName = "literal;name,with comma.txt";
+  await writeFile(join(temporary, literalName), "one\ntwo\nthree\nfour\nfive\n");
+  const selected = await execute("hashline_read", { path: `${literalName}:1-1,5-5` });
+  assert.match(selected, /1:one/u); assert.match(selected, /5:five/u); assert(!selected.includes("3:three"));
+  assert.match(await execute("hashline_read", { path: literalName, offset: 2, limit: 1 }), /2:two/u);
+  assert.match(await execute("hashline_read", { path: literalName, offset: "2", limit: 1.5 }), /2:two/u);
+  await execute("write", { path: "empty.txt", content: "" });
+  assert.equal(await readFile(join(temporary, "empty.txt"), "utf8"), "");
+  await assert.rejects(execute("write", { path: "xd://reject", content: "" }), /reason/u);
+  await writeFile(join(temporary, "schema-one.ts"), "console.log(1);\n");
+  await writeFile(join(temporary, "schema-two.ts"), "console.log(2);\n");
+  assert.match(await execute("ast_grep", { pat: "console.log($VALUE)", path: "schema-one.ts;schema-two.ts", lang: "ts", skip: 0 }), /2 matches/u);
+  const skipped = await execute("ast_grep", { pat: "console.log($VALUE)", path: "schema-one.ts;schema-two.ts", skip: 1.5 });
+  assert.match(skipped, /schema-two\.ts/u); assert(!skipped.includes("[schema-one.ts#"));
+  await execute("ast_edit", { paths: ["schema-one.ts", "schema-two.ts"], ops: [{ pat: "console.log($VALUE);", out: "" }] });
+  await execute("write", { path: "xd://resolve", content: "Delete only the two reviewed calls." });
+  assert.equal((await readFile(join(temporary, "schema-one.ts"), "utf8")).trim(), "");
+  assert.equal((await readFile(join(temporary, "schema-two.ts"), "utf8")).trim(), "");
+  console.log(`PASS: ${invalidArguments.length} invalid argument shapes rejected by Pi; all field descriptions, literal filenames, ranges, empty contents, target arrays, language alias, and empty AST replacement verified`);
   assert.match(await execute("ls", { path: "." }), /file\.ts/u);
   assert.match(await execute("find", { pattern: "*.ts", path: "." }), /file\.ts/u);
 

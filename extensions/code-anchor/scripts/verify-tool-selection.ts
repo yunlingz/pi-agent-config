@@ -33,6 +33,8 @@ try {
     ["src/single.ts", '// console.warn("comment");\nexport const sample = \'console.warn("string")\';\nconsole.warn("actual");\n'],
     ["known.txt", "first\nsecond\nKNOWN_RANGE_OK\nfourth\n"],
     ["legacy/source.ex", 'defmodule Fixture do\n  def persist do\n    Cache.write("legacy")\n  end\nend\n'],
+    ["batch-one.txt", "unused\nBATCH_ONE_A\nunused\nunused\nBATCH_ONE_B\n"],
+    ["batch-two.txt", "unused\nunused\nBATCH_TWO\n"],
   ]);
   await mkdir(join(temporary, "src"));
   await mkdir(join(temporary, "styles"));
@@ -79,7 +81,7 @@ try {
       toolOutcomes.push({ phase, tool: event.toolName, failed: event.isError });
     }
   });
-  const runCase = async (label: string, prompt: string, requiredTools: string[], checks: { first?: string; ordered?: string[]; forbidden?: string[] } = {}): Promise<string> => {
+  const runCase = async (label: string, prompt: string, requiredTools: string[], checks: { first?: string; ordered?: string[]; forbidden?: string[]; readFiles?: string[] } = {}): Promise<string> => {
     phase = label;
     const offset = events.length;
     let timedOut = false;
@@ -114,6 +116,13 @@ try {
         previous = index;
       }
       for (const name of checks.forbidden ?? []) assert(!started.includes(name), `${label}: unnecessary or unsupported ${name}`);
+      if (checks.readFiles) {
+        const reads = turn.filter(event => event.type === "tool_execution_start" && event.toolName === "hashline_read");
+        for (const file of checks.readFiles) {
+          assert(reads.some(event => event.type === "tool_execution_start" && typeof event.args.path === "string" && (event.args.path === file || event.args.path.startsWith(`${file}:`))), `${label}: missing separate call for ${file}`);
+        }
+        assert(!turn.some(event => event.type === "tool_execution_end" && event.isError), `${label}: all separate reads must succeed`);
+      }
       console.log(`PASS: natural ${label}; selected ${used.join(", ")}`);
       return live.session.getLastAssistantText() ?? "";
     } finally {
@@ -134,6 +143,8 @@ try {
   assert(assignment.includes("configure") && assignment.includes("reasoning"), "Identify the actual assignment and its condition");
   const known = await runCase("known range", "Return only the content of line 3 in known.txt. Do not change files.", ["hashline_read"], { first: "hashline_read", forbidden: ["grep", "ast_grep", "find", "ls"] });
   assert.equal(known.trim(), "KNOWN_RANGE_OK");
+  const batch = await runCase("multiple files with selectors", "Return only lines 2 and 5 from batch-one.txt and line 3 from batch-two.txt, in that order. Preserve their text. Do not change files.", ["hashline_read"], { first: "hashline_read", forbidden: ["grep", "ast_grep", "find", "ls", "bash"], readFiles: ["batch-one.txt", "batch-two.txt"] });
+  assert.equal(batch.trim(), "BATCH_ONE_A\nBATCH_ONE_B\nBATCH_TWO");
   await runCase("literal search", "Find the literal DOCGEN_READY in events.log and report its line number. Do not change files.", ["grep"], { first: "grep" });
   await runCase("unsupported syntax search", "Find every $accent reference in styles/theme.scss and report its line number. Do not change files.", ["grep"], { first: "grep", forbidden: ["ast_grep"] });
   const legacy = await runCase("unsupported language", "Locate the Cache.write call in legacy/source.ex and report its line number. Do not change files.", ["grep"], { forbidden: ["ast_grep"] });
@@ -169,7 +180,7 @@ try {
   assert.match(fallback, /value\W+1/u);
   assert.match(fallback, /value\W+2/u);
   await checkFixtures();
-  console.log("PASS: twelve natural tasks; tool order, language fallback, exact file changes, configured model, and reasoning verified");
+  console.log("PASS: thirteen natural tasks; separate multi-file reads, tool order, language fallback, exact file changes, model, and reasoning verified");
 } catch (error) {
   console.error(JSON.stringify({
     phase,

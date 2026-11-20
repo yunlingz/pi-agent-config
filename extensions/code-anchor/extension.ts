@@ -87,11 +87,15 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
   function registerTools(cwd: string): void {
     const builtinRead = createReadToolDefinition(cwd);
     const builtinWrite = createWriteToolDefinition(cwd);
+    const writeParameters = Type.Object({
+      path: Type.String({ minLength: 1, description: "One destination file, relative or absolute. For a reviewed ast_edit preview, use exactly xd://resolve to apply or xd://reject to discard. Do not append read selectors or join multiple targets.", examples: ["notes.md", "xd://resolve", "xd://reject"] }),
+      content: Type.String({ description: "File contents for a regular destination, or a nonempty reason for xd://resolve or xd://reject. Empty file contents are allowed; an empty preview reason is not." }),
+    }, { additionalProperties: false });
     const readParameters = Type.Object({
-      path: Type.String(),
-      offset: Type.Optional(Type.Integer({ minimum: 1 })),
-      limit: Type.Optional(Type.Integer({ minimum: 1 })),
-    });
+      path: Type.String({ minLength: 1, description: "One file path, relative or absolute, optionally followed by selectors. Commas separate ranges in that same file, not files. Do not combine filenames with semicolons. For multiple files, make separate hashline_read calls.", examples: ["src/index.ts", "src/index.ts:16-25,88-114", "src/index.ts:raw"] }),
+      offset: Type.Optional(Type.Integer({ minimum: 1, description: "First source line, starting at 1. Omitted means 1. Use when the path has no range selector." })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum lines to read when no range selector is present. Omitted means 300, or 2000 with :raw. Output limits still apply." })),
+    }, { additionalProperties: false });
     pi.registerTool<typeof readParameters, FileTrackingDetails>({
       name: "hashline_read", label: "Hashline Read · CodeAnchor",
       description: "Read files with snapshot-tagged line anchors. If the file and relevant lines are known, open that range directly. Text reading does not require AST grammar support. Bare code reads can summarize supported syntax; unsupported syntax remains ordinary text. Inspect relevant implementations before editing. For hashline_edit, obtain current snapshot tags and line anchors from hashline_read. Put optional line selectors in path: :N-M, :N+K, :N-, :-N, or comma ranges. :raw returns exact text without anchors; combine it with a range. Non-raw single ranges include surrounding context and supported syntax boundaries. Images use Pi's standard reader. Output is limited to 2000 lines or 50KB.",
@@ -102,7 +106,7 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
         "Use hashline_read for text files even when AST tools do not support their language or syntax.",
         "Use hashline_read before hashline_edit or ast_edit. For hashline_edit, copy its latest [path#TAG] header and source line numbers.",
         "If hashline_read summarizes needed source, open the omitted ranges. Never infer hidden source or invent anchors.",
-        "When practical, batch independent hashline_read calls.",
+        "For multiple files, make separate hashline_read calls. Group independent calls only when the execution interface supports it; never join filenames in path.",
       ],
       renderCall(args, theme) {
         const range = args.offset === undefined ? "" : `:${args.offset}${args.limit === undefined ? "-" : `+${args.limit}`}`;
@@ -143,7 +147,9 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
         "After hashline_edit, review the resulting diff and run applicable checks. Applying edits does not prove behavioral correctness.",
         "When CodeAnchor is on, do not use native read or edit instead of hashline_read or hashline_edit.",
       ],
-      parameters: Type.Object({ input: Type.String({ minLength: 1 }) }),
+      parameters: Type.Object({
+        input: Type.String({ minLength: 1, description: "One hashline edit document using current [path#TAG] headers from hashline_read. Use actual newlines and +payload lines. Multiple files use separate headers in this string, not a paths array. Do not supply native oldText/newText edits.", examples: ["[src/index.ts#ABCD]\nPUT 2.=2:\n+replacement line"] }),
+      }, { additionalProperties: false }),
       executionMode: "sequential",
       async execute(_id, params, signal, _update, ctx) {
         if (!enabled) throw new Error("CodeAnchor is off");
@@ -186,11 +192,11 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
         "When ast_grep coverage is uncertain, zero matches do not prove absence. Inspect relevant results with hashline_read.",
       ],
       parameters: Type.Object({
-        pat: Type.String({ minLength: 1 }),
-        path: Type.Optional(Type.String()),
-        lang: Type.Optional(Type.String({ description: "Optional supported grammar name or alias. If omitted, detect language from filenames. An explicit grammar applies to every selected file; narrow mixed-language paths." })),
-        skip: Type.Optional(Type.Integer({ minimum: 0 })),
-      }),
+        pat: Type.String({ minLength: 1, description: "Structural code pattern, not a text regex. $NAME captures one node; $$$NAME captures multiple nodes. Match the syntax that performs the action.", examples: ["params.include = $VALUE", "cache.write($$$ARGS)"] }),
+        path: Type.Optional(Type.String({ minLength: 1, description: "Files, directories, or globs to search. Omitted means the current directory. Separate multiple targets with semicolons, for example src;tests. Do not append hashline_read line selectors.", examples: ["src/**/*.ts", "src;tests"] })),
+        lang: Type.Optional(Type.String({ minLength: 1, description: "Optional supported grammar name or alias. If omitted, detect language from filenames. An explicit grammar applies to every selected file; narrow mixed-language paths." })),
+        skip: Type.Optional(Type.Integer({ minimum: 0, description: "Number of matches already seen, not a page number. Omitted means 0. Use the next skip value reported by the previous 50-match result." })),
+      }, { additionalProperties: false }),
       executionMode: "sequential",
       async execute(_id, params, signal, _update, ctx) {
         if (!enabled) throw new Error("CodeAnchor is off");
@@ -216,7 +222,13 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
         "Apply or discard a pending ast_edit preview before another editing method changes its affected files.",
         "After ast_edit resolution, review the resulting diff and run applicable checks. Successful matching does not prove behavioral correctness.",
       ],
-      parameters: Type.Object({ ops: Type.Array(Type.Object({ pat: Type.String({ minLength: 1 }), out: Type.String() }), { minItems: 1 }), paths: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }) }),
+      parameters: Type.Object({
+        ops: Type.Array(Type.Object({
+          pat: Type.String({ minLength: 1, description: "Structural pattern to replace. Use $NAME or $$$NAME captures; use a distinct pattern for each operation.", examples: ["console.log($VALUE)"] }),
+          out: Type.String({ description: "Replacement code using captures from pat. An empty string deletes the matched node. This is not a diff or hashline edit document.", examples: ["logger.info($VALUE)", ""] }),
+        }, { additionalProperties: false }), { minItems: 1, description: "Nonempty array of structural {pat,out} operations. Applies to the selected paths. Preview does not write files." }),
+        paths: Type.Array(Type.String({ minLength: 1, description: "One file, directory, or glob per element. No read selectors or semicolon-separated target lists." }), { minItems: 1, description: "Nonempty array of targets. Use separate elements for multiple targets, not one joined string.", examples: [["src/one.ts", "src/two.ts"]] }),
+      }, { additionalProperties: false }),
       executionMode: "sequential",
       async execute(_id, params, signal, _update, ctx) {
         if (!enabled) throw new Error("CodeAnchor is off");
@@ -226,8 +238,9 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
       },
       ...astEditRenderers,
     });
-    pi.registerTool<typeof builtinWrite.parameters, FileTrackingDetails | undefined>({
+    pi.registerTool<typeof writeParameters, FileTrackingDetails | undefined>({
       ...builtinWrite,
+      parameters: writeParameters,
       description: `${builtinWrite.description} For reviewed ast_edit previews, write a reason to xd://resolve or xd://reject. Do not bypass edit safeguards.`,
       executionMode: "sequential",
       promptGuidelines: [

@@ -78,6 +78,11 @@ It disables and blocks native `read` and `edit`, including calls through Pi's ne
 Pi's `defaultTools` selects `write`, `grep`, `find`, and `ls`; CodeAnchor manages its own tools.
 Ordinary `write` operations remain Pi operations; the adapter handles staged AST resolution URLs.
 Local read paths accept single ranges, range lists, tails, open ranges, and `:raw` compounds.
+Each `hashline_read` call accepts one file. Commas select ranges in that file; multiple files need separate calls.
+`ast_grep.path` accepts semicolon-separated targets. `ast_edit.paths` uses one target per array element.
+`hashline_edit.input` is one multiline document; multiple files use separate `[path#TAG]` headers.
+Every parameter has an explicit description. Required targets must be nonempty, and unknown argument fields are rejected.
+Empty AST replacements and regular file contents remain valid. AST resolution still requires a nonempty reason.
 Bare code reads use the pinned structural summarizer for eligible long files.
 Summary omissions are not counted as displayed edit anchors; the footer gives concrete ranges to re-read.
 
@@ -191,11 +196,12 @@ It also performs native manual compaction, checks persisted file metadata, reloa
 Its temporary project settings retain no recent history for that compaction case; global settings remain unchanged.
 Live tests use temporary fixtures and retain the configured provider, model, and reasoning level.
 They do not certify every model-generated edit.
-`scripts/verify-tool-selection.ts` checks twelve natural tasks without global instructions or tool names in task prompts.
+`scripts/verify-tool-selection.ts` checks thirteen natural tasks without global instructions or tool names in task prompts.
 It checks tool order, known ranges, misleading literals, unsupported syntax, both editing methods, and explicitly selected native fallback.
 `verify-tool-policy.ts` checks actual Pi CLI activation, restrictions, reload, and resumed native loadouts without external model requests.
 Integration checks cover guidance from all five CodeAnchor tool definitions in Pi's prompt and local provider requests.
 They check guidance removal, unchanged native `read`/`edit` definitions, and native `write` restoration when off, plus guidance restoration after re-enable and reload.
+The integration check rejects invalid argument shapes and checks literal punctuation in filenames, selectors, and empty replacement or file contents.
 The live session verifier checks active guidance after real manual compaction and reload.
 The integration verifier also renders actual tool results through Pi's renderer resolution and tool component.
 It checks folding, expansion, resizing, wide characters, target headers, and unchanged model-facing results at 24, 60, and 120 columns.
