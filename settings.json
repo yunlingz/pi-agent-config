@@ -4,8 +4,6 @@
   "defaultModel": "gpt-6.1-sol",
   "transport": "sse",
   "defaultTools": [
-    "read",
-    "edit",
     "write",
     "grep",
     "find",

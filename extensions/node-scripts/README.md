@@ -346,25 +346,26 @@ Full logs and indefinite services can consume unbounded disk space. There is no 
 
 ## Native tools and resumed sessions
 
-This configuration uses exactly six built-in tools by default; extension tools remain available:
+This configuration selects four built-in tools by default; extension tools remain available:
 
 ```json
-"defaultTools": ["read", "edit", "write", "grep", "find", "ls"]
+"defaultTools": ["write", "grep", "find", "ls"]
 ```
 
 node-scripts preserves the active native file tools. It does not activate missing tools or overwrite another extension's selection.
 Project settings and CLI options can override these defaults.
+CodeAnchor separately provides `hashline_read` and `hashline_edit` and blocks native `read` and `edit` while on.
 
 Pi 1.5.1 restores a resumed session's recorded tool selection. Changing defaults alone does not repair that selection.
 `/reload` adds newly configured defaults, but does not remove previously active tools or re-enable unchanged defaults.
 To correct an affected session once, resume it with modifiers:
 
 ```text
-pi --no-mcp --resume --tools +read,+edit,+write,+grep,+find,+ls,-bash,-powershell
+pi --no-mcp --resume --tools +write,+grep,+find,+ls,-bash,-powershell
 ```
 
 The modifiers preserve extension tools. After the next model request, Pi records the corrected selection in the session.
-Do not use a plain `--tools read,edit,...` allowlist here; it can exclude extension tools.
+Do not use a plain `--tools write,grep,...` allowlist here; it can exclude extension tools.
 
 ## Replacement and verification
 

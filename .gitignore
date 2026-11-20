@@ -74,6 +74,7 @@
 !/extensions/code-anchor/core-client.ts
 !/extensions/code-anchor/worker.ts
 !/extensions/code-anchor/verify-integration.ts
+!/extensions/code-anchor/verify-tool-policy.ts
 !/extensions/code-anchor/verify-live.ts
 !/extensions/code-anchor/verify-live-session.ts
 !/extensions/code-anchor/verify-performance.ts

@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
+import { createRequire } from "node:module";
 import { resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { testTUI, testUI } from "../../scripts/test-fixtures.ts";
 import { STATUS_KEY } from "./controls.ts";
@@ -15,6 +16,8 @@ import type { GrammarManifest } from "./scripts/grammar-types.ts";
 const installation = process.argv[2];
 assert(installation, "Usage: node verify-integration.ts <installed-pi-package-directory>");
 const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(resolve(installation), "dist/index.js")).href);
+const require = createRequire(pathToFileURL(join(resolve(installation), "package.json")));
+const { Type }: typeof import("typebox") = await import(pathToFileURL(require.resolve("typebox")).href);
 const ai: typeof import("@earendil-works/pi-ai") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-ai", resolve(installation))).href);
 const temporary = await mkdtemp(join(tmpdir(), "code-anchor-integration-"));
 let session: AgentSession | undefined;
@@ -65,7 +68,21 @@ try {
   await loader.reload();
   assert.deepEqual(loader.getExtensions().errors, []);
   assert.equal(loader.getExtensions().extensions.length, 1, "Pi must discover CodeAnchor without an explicit extension path");
-  ({ session } = await sdk.createAgentSession({ cwd: temporary, agentDir: temporary, settingsManager: settings, modelRuntime: runtime, model: runtime.getModel("code-anchor-fixture", "fixture"), thinkingLevel: "off", resourceLoader: loader, sessionManager: sdk.SessionManager.inMemory() }));
+  ({ session } = await sdk.createAgentSession({ cwd: temporary, agentDir: temporary, settingsManager: settings, modelRuntime: runtime, model: runtime.getModel("code-anchor-fixture", "fixture"), thinkingLevel: "off", resourceLoader: loader, sessionManager: sdk.SessionManager.inMemory(), customTools: [{
+    name: "native_attempt", label: "Native guard fixture", description: "Exercise actual nested native calls in the fixture.", parameters: Type.Object({}),
+    async execute(_id, _args, _signal, _update, ctx) {
+      assert(session);
+      session.setActiveToolsByName([...session.getActiveToolNames(), "read", "edit"]);
+      const result = await ctx.executeTool("read", { path: "file.ts" });
+      assert(result.isError);
+      assert(result.result.content.some(block => block.type === "text" && block.text.includes("CodeAnchor is on")));
+      session.setActiveToolsByName([...session.getActiveToolNames(), "edit"]);
+      const edit = await ctx.executeTool("edit", { path: "file.ts", edits: [{ oldText: "logger.info(value);", newText: "BAD;" }] });
+      assert(edit.isError);
+      assert(edit.result.content.some(block => block.type === "text" && block.text.includes("CodeAnchor is on")));
+      return { content: [{ type: "text", text: "Both nested native calls were blocked." }], details: undefined };
+    },
+  }] }));
   const statuses = new Map<string, string>();
   const errors: unknown[] = [];
   await session.bindExtensions({ mode: "tui", uiContext: testUI(session, {
@@ -90,10 +107,12 @@ try {
   assert.equal(statuses.get(STATUS_KEY), "code-anchor: on");
   assert(runner.getActiveTools().includes("ast_grep"));
   assert(runner.getActiveTools().includes("ast_edit"));
-  const builtinNames = ["read", "bash", "edit", "write", "grep", "find", "ls"];
-  for (const name of builtinNames) {
+  const builtinNames = ["bash", "write", "grep", "find", "ls"];
+  const codeAnchorNames = ["hashline_read", "hashline_edit", "ast_grep", "ast_edit"];
+  for (const name of [...builtinNames, ...codeAnchorNames]) {
     assert(runner.getActiveTools().includes(name), `CodeAnchor must retain ${name}`);
   }
+  for (const name of ["read", "edit"]) assert(!runner.getActiveTools().includes(name), `Native ${name} must be inactive`);
   const manifest = JSON.parse(await readFile(new URL("./grammars.json", import.meta.url), "utf8")) as GrammarManifest;
   const grammarNames = manifest.grammars.map(grammar => grammar.name);
   for (const name of ["ast_grep", "ast_edit"]) {
@@ -106,7 +125,7 @@ try {
   }
   const nativeDefinitions = [sdk.createReadToolDefinition(temporary), sdk.createEditToolDefinition(temporary), sdk.createWriteToolDefinition(temporary)];
   const nativeGuidelines = nativeDefinitions.flatMap(tool => tool.promptGuidelines ?? []);
-  const codeAnchorTools = session.getAllTools().filter(tool => ["read", "edit", "write", "ast_grep", "ast_edit"].includes(tool.name));
+  const codeAnchorTools = session.getAllTools().filter(tool => [...codeAnchorNames, "write"].includes(tool.name));
   assert.equal(codeAnchorTools.length, 5);
   const codeAnchorGuidelines = codeAnchorTools.flatMap(tool => tool.promptGuidelines ?? []).filter(rule => !nativeGuidelines.includes(rule));
   const guidance = (name: string): string => {
@@ -114,18 +133,23 @@ try {
     assert(tool);
     return [tool.description, ...(tool.promptGuidelines ?? [])].join("\n");
   };
-  assert.match(guidance("read"), /batch independent read calls/iu);
-  assert.match(guidance("read"), /omitted ranges/u);
-  assert.match(guidance("ast_grep"), /Prefer Pi's grep/u);
+  assert.match(guidance("hashline_read"), /batch independent hashline_read calls/iu);
+  assert.match(guidance("hashline_read"), /omitted ranges/u);
+  const searchGuidance = guidance("ast_grep");
+  assert.match(searchGuidance, /Prefer Pi's built-in text-search tool \(grep\)/u);
+  assert(searchGuidance.indexOf("built-in text-search") < searchGuidance.indexOf("try ripgrep"));
+  assert(searchGuidance.indexOf("try ripgrep") < searchGuidance.indexOf("another available text-search method"));
+  assert.match(searchGuidance, /params\.include = \$VALUE/u);
+  assert.match(guidance("ast_edit"), /unsupported syntax.*hashline_edit/iu);
   assert.match(guidance("ast_grep"), /rg --files/u);
   assert.match(guidance("ast_grep"), /available command-execution tool/u);
   assert.doesNotMatch(guidance("ast_grep"), /use bash|script_inline|script_js/iu);
-  assert.match(guidance("edit"), /stale anchors/u);
-  assert.match(guidance("edit"), /applicable checks/u);
+  assert.match(guidance("hashline_edit"), /stale anchors/u);
+  assert.match(guidance("hashline_edit"), /applicable checks/u);
   assert.match(guidance("ast_edit"), /match count/iu);
   assert.match(guidance("write"), /xd:\/\/resolve/u);
   const assertGuidance = (enabled: boolean): void => {
-    expectedGuidelines = enabled ? codeAnchorGuidelines : nativeGuidelines;
+    expectedGuidelines = enabled ? codeAnchorGuidelines : nativeDefinitions.filter(tool => tool.name === "write").flatMap(tool => tool.promptGuidelines ?? []);
     excludedGuidelines = enabled ? [] : codeAnchorGuidelines;
     for (const guideline of expectedGuidelines) assert(session?.systemPrompt.includes(guideline), "Active tool guidance must reach Pi's prompt");
     for (const guideline of excludedGuidelines) assert(!session?.systemPrompt.includes(guideline), "Disabled guidance must leave Pi's prompt");
@@ -144,10 +168,10 @@ try {
   assert.match(await execute("find", { pattern: "*.ts", path: "." }), /file\.ts/u);
 
   phase = "checking hashline read/edit through Pi's tool validation";
-  const read = await execute("read", { path: "file.ts" });
+  const read = await execute("hashline_read", { path: "file.ts" });
   const tag = /\[file\.ts#([0-9A-F]{4})\]/u.exec(read)?.[1];
   assert(tag, read);
-  await execute("edit", { input: `[file.ts#${tag}]\nPUT 1:\n+console.log(value);` });
+  await execute("hashline_edit", { input: `[file.ts#${tag}]\nPUT 1:\n+console.log(value);` });
   assert.equal(await readFile(file, "utf8"), "console.log(value);\r\n");
 
   phase = "checking shared Pi file locks";
@@ -155,9 +179,9 @@ try {
   const release = Promise.withResolvers<void>();
   const started = Promise.withResolvers<void>();
   const stopObserving = session.subscribe(event => {
-    if (event.type === "tool_execution_start" && event.toolName === "edit") started.resolve();
+    if (event.type === "tool_execution_start" && event.toolName === "hashline_edit") started.resolve();
   });
-  const current = await execute("read", { path: "file.ts" });
+  const current = await execute("hashline_read", { path: "file.ts" });
   const currentTag = /\[file\.ts#([0-9A-F]{4})\]/u.exec(current)?.[1];
   assert(currentTag);
   const blocker = sdk.withFileMutationQueue(file, async () => {
@@ -165,7 +189,7 @@ try {
     await release.promise;
   });
   await locked.promise;
-  const blockedEdit = execute("edit", { input: `[file.ts#${currentTag}]\nPUT 1:\n+console.log(lockedValue);` });
+  const blockedEdit = execute("hashline_edit", { input: `[file.ts#${currentTag}]\nPUT 1:\n+console.log(lockedValue);` });
   try {
     await started.promise;
     assert.equal(await readFile(file, "utf8"), "console.log(value);\r\n");
@@ -196,20 +220,26 @@ try {
   assert.equal(await readFile(file, "utf8"), "logger.warn(outsideChange);\r\n");
   await writeFile(file, "logger.info(value);\r\n");
 
-  phase = "checking actual tool replacement and default-on preference";
+  phase = "checking separate tools, native blocking, and default-on preference";
+  await assert.rejects(execute("read", { path: "file.ts" }), /not found|not callable|unknown tool|CodeAnchor is on/iu);
+  await assert.rejects(execute("edit", { path: "file.ts", edits: [{ oldText: "logger.info(value);", newText: "BAD;" }] }), /not found|not callable|unknown tool|CodeAnchor is on/iu);
+  assert.equal(await readFile(file, "utf8"), "logger.info(value);\r\n");
+  assert.match(await execute("native_attempt", {}), /Both nested native calls were blocked/u);
+  for (const name of ["read", "edit"]) assert(!session.getActiveToolNames().includes(name));
+  assert.equal(await readFile(file, "utf8"), "logger.info(value);\r\n");
   await session.prompt("/code-anchor off");
   assert.equal(statuses.get(STATUS_KEY), "code-anchor: off");
-  assert(!runner.getActiveTools().includes("ast_grep"));
-  assert(!runner.getActiveTools().includes("ast_edit"));
-  for (const name of builtinNames) {
-    assert(runner.getActiveTools().includes(name), `Disabling CodeAnchor must retain ${name}`);
-  }
+  for (const name of codeAnchorNames) assert(!runner.getActiveTools().includes(name));
+  for (const name of ["read", "edit"]) assert(!runner.getActiveTools().includes(name), `Off must not activate native ${name}`);
+  for (const name of builtinNames) assert(runner.getActiveTools().includes(name));
   assertGuidance(false);
   await session.reload();
   runner = session.extensionRunner;
   assert.equal(statuses.get(STATUS_KEY), "code-anchor: off");
   assert(!runner.getActiveTools().includes("ast_grep"));
   assertGuidance(false);
+  for (const name of ["read", "edit", ...codeAnchorNames]) assert(!runner.getActiveTools().includes(name));
+  session.setActiveToolsByName([...session.getActiveToolNames(), "read", "edit"]);
   const ordinary = await execute("read", { path: "file.ts" });
   assert(!ordinary.includes("[file.ts#"));
   await execute("edit", { path: "file.ts", edits: [{ oldText: "logger.info(value);", newText: "logger.warn(value);" }] });
@@ -217,7 +247,8 @@ try {
   await session.prompt("/code-anchor on");
   assert.equal(statuses.get(STATUS_KEY), "code-anchor: on");
   assertGuidance(true);
-  assert.match(await execute("read", { path: "file.ts" }), /\[file\.ts#[0-9A-F]{4}\]/u);
+  for (const name of ["read", "edit"]) assert(!runner.getActiveTools().includes(name));
+  assert.match(await execute("hashline_read", { path: "file.ts" }), /\[file\.ts#[0-9A-F]{4}\]/u);
   await session.reload();
   runner = session.extensionRunner;
   assertGuidance(true);
@@ -228,8 +259,8 @@ try {
   assert.match(fallback, /color/u);
   const imagePath = join(temporary, "pixel.data");
   await writeFile(imagePath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
-  await execute("read", { path: "pixel.data" });
-  const imageResult = session.messages.findLast(message => message.role === "toolResult" && message.toolName === "read");
+  await execute("hashline_read", { path: "pixel.data" });
+  const imageResult = session.messages.findLast(message => message.role === "toolResult" && message.toolName === "hashline_read");
   assert(imageResult?.role === "toolResult" && imageResult.content.some(block => block.type === "image"), "Image detection must use content, not only the file extension");
 
   phase = "checking collapsed and expanded tool rendering";
@@ -252,7 +283,7 @@ try {
       assert(!collapsed.join("").replace(/\s/gu, "").includes(marker), `${name}: collapsed output must hide distant content`);
       assert(collapsed.filter(line => line.trim()).length <= 16, `${name}: collapsed output must stay compact at width ${width}`);
       assert(collapsed.every(line => tui.visibleWidth(line) <= width), `${name}: output must fit the terminal`);
-      if (name === "edit") assert(collapsed.join("\n").includes("render.ts"), "Hashline edit headers must identify their target");
+      if (name === "hashline_edit") assert(collapsed.join("\n").includes("render.ts"), "Hashline edit headers must identify their target");
       component.setExpanded(true);
       const expanded = component.render(width).map(stripVTControlCharacters).join("\n");
       assert(expanded.replace(/\s/gu, "").includes(marker), `${name}: expansion must reveal the retained result`);
@@ -264,13 +295,13 @@ try {
   };
   const renderSource = Array.from({ length: 40 }, (_, index) => `console.log("${index === 39 ? "FOLD_LAST_ROW" : `row_${index}`} ${"界".repeat(40)}");`).join("\n") + "\n";
   await writeFile(join(temporary, "render.ts"), renderSource);
-  const renderRead = await execute("read", { path: "render.ts" });
-  checkRendering("read", { path: "render.ts" }, "FOLD_LAST_ROW");
+  const renderRead = await execute("hashline_read", { path: "render.ts" });
+  checkRendering("hashline_read", { path: "render.ts" }, "FOLD_LAST_ROW");
   const renderTag = /\[render\.ts#([0-9A-F]{4})\]/u.exec(renderRead)?.[1];
   assert(renderTag);
   const renderEditInput = `[render.ts#${renderTag}]\nPUT 1.=40:\n${renderSource.trimEnd().split("\n").map(line => `+${line.replace("console.log", "console.warn")}`).join("\n")}`;
-  await execute("edit", { input: renderEditInput });
-  checkRendering("edit", { input: renderEditInput }, "FOLD_LAST_ROW");
+  await execute("hashline_edit", { input: renderEditInput });
+  checkRendering("hashline_edit", { input: renderEditInput }, "FOLD_LAST_ROW");
   const searchArgs = { pat: "console.warn($VALUE)", path: "render.ts" };
   await execute("ast_grep", searchArgs);
   checkRendering("ast_grep", searchArgs, "FOLD_LAST_ROW");
@@ -283,11 +314,11 @@ try {
   const ordinaryWrite = { path: "ordinary.txt", content: Array.from({ length: 40 }, (_, index) => index === 39 ? "WRITE_LAST_ROW" : `row_${index}`).join("\n") };
   await execute("write", ordinaryWrite);
   checkRendering("write", ordinaryWrite, "WRITE_LAST_ROW");
-  await assert.rejects(execute("read", { path: "missing-render-fixture.txt" }), /not found/iu);
-  const failedRead = session.messages.findLast(message => message.role === "toolResult" && message.toolName === "read");
+  await assert.rejects(execute("hashline_read", { path: "missing-render-fixture.txt" }), /not found/iu);
+  const failedRead = session.messages.findLast(message => message.role === "toolResult" && message.toolName === "hashline_read");
   assert(failedRead?.role === "toolResult" && failedRead.isError);
-  const failedRenderers = runner.resolveToolRenderers("read", () => withBuiltInRenderers("read", session?.getToolDefinition("read")));
-  const failureComponent = new sdk.ToolExecutionComponent("read", "read-error", { path: "missing-render-fixture.txt" }, {}, failedRenderers, testTUI(new tui.Container()), temporary);
+  const failedRenderers = runner.resolveToolRenderers("hashline_read", () => withBuiltInRenderers("read", session?.getToolDefinition("hashline_read")));
+  const failureComponent = new sdk.ToolExecutionComponent("hashline_read", "read-error", { path: "missing-render-fixture.txt" }, {}, failedRenderers, testTUI(new tui.Container()), temporary);
   failureComponent.updateResult({ content: failedRead.content, details: failedRead.details, isError: true });
   assert.match(failureComponent.render(60).map(stripVTControlCharacters).join("\n"), /not found/iu, "Read failures must remain visible while collapsed");
   console.log("PASS: actual read/edit/AST/resolution results fold, expand, resize, and retain model-facing bytes");

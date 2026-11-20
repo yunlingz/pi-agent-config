@@ -29,9 +29,14 @@ try {
     ["events.log", "STARTED\nDOCGEN_READY\nFINISHED\n"],
     ["styles/theme.scss", "$accent: blue;\n.panel { color: $accent; }\n"],
     ["notes.md", "# Status\n\n## Archived\nDraft\n\n## Pending\nDraft\n"],
+    ["src/params.ts", '// params.include = ["reasoning.encrypted_content"];\nexport const example = \'params.include = ["reasoning.encrypted_content"]\';\nexport function configure(params, reasoning) {\n  if (reasoning) {\n    params.include = ["reasoning.encrypted_content"];\n  }\n}\n'],
+    ["src/single.ts", '// console.warn("comment");\nexport const sample = \'console.warn("string")\';\nconsole.warn("actual");\n'],
+    ["known.txt", "first\nsecond\nKNOWN_RANGE_OK\nfourth\n"],
+    ["legacy/source.ex", 'defmodule Fixture do\n  def persist do\n    Cache.write("legacy")\n  end\nend\n'],
   ]);
   await mkdir(join(temporary, "src"));
   await mkdir(join(temporary, "styles"));
+  await mkdir(join(temporary, "legacy"));
   for (const [path, content] of fixtures) {
     await writeFile(join(temporary, path), content);
   }
@@ -59,10 +64,13 @@ try {
   const extensionErrors: unknown[] = [];
   await session.bindExtensions({ mode: "json", onError: error => extensionErrors.push(error) });
   assert(!session.systemPrompt.includes("## Inspect code and choose tools"), "Natural selection must not depend on global tool procedures");
-  const builtinNames = ["read", "bash", "edit", "write", "grep", "find", "ls"];
-  for (const name of [...builtinNames, "ast_grep", "ast_edit"]) {
+  const builtinNames = ["bash", "write", "grep", "find", "ls"];
+  const codeAnchorNames = ["hashline_read", "hashline_edit", "ast_grep", "ast_edit"];
+  session.setActiveToolsByName([...session.getActiveToolNames(), ...builtinNames]);
+  for (const name of [...builtinNames, ...codeAnchorNames]) {
     assert(session.getActiveToolNames().includes(name), `Missing tool-selection candidate: ${name}`);
   }
+  for (const name of ["read", "edit"]) assert(!session.getActiveToolNames().includes(name));
   const events: AgentSessionEvent[] = [];
   session.subscribe(event => {
     if (event.type !== "message_update") events.push(event);
@@ -71,7 +79,7 @@ try {
       toolOutcomes.push({ phase, tool: event.toolName, failed: event.isError });
     }
   });
-  const runCase = async (label: string, prompt: string, requiredTools: string[]): Promise<string> => {
+  const runCase = async (label: string, prompt: string, requiredTools: string[], checks: { first?: string; ordered?: string[]; forbidden?: string[] } = {}): Promise<string> => {
     phase = label;
     const offset = events.length;
     let timedOut = false;
@@ -97,6 +105,15 @@ try {
       assert.equal(extensionErrors.length, 0, "Extension error; raw diagnostics withheld");
       assert.equal(live.session.thinkingLevel, reasoning);
       const used = turn.filter(event => event.type === "tool_execution_end").map(event => event.toolName);
+      const started = turn.filter(event => event.type === "tool_execution_start").map(event => event.toolName);
+      if (checks.first) assert.equal(started[0], checks.first, `${label}: incorrect first tool`);
+      let previous = -1;
+      for (const name of checks.ordered ?? []) {
+        const index = started.indexOf(name);
+        assert(index > previous, `${label}: ${name} must follow source inspection or preview`);
+        previous = index;
+      }
+      for (const name of checks.forbidden ?? []) assert(!started.includes(name), `${label}: unnecessary or unsupported ${name}`);
       console.log(`PASS: natural ${label}; selected ${used.join(", ")}`);
       return live.session.getLastAssistantText() ?? "";
     } finally {
@@ -111,29 +128,39 @@ try {
 
   console.log(`START: natural tool selection on ${model.provider}/${model.id}; reasoning ${reasoning}; real requests can incur charges`);
   await runCase("file discovery", "List the immediate entries in src, then locate every .ts file below src. Do not read contents or change files.", ["ls", "find"]);
-  const trace = await runCase("structural exploration", "Locate every actual cache.write(...) call under src. Report each enclosing function and its arguments. Ignore comments and string examples. Do not change files.", ["ast_grep", "read"]);
+  const trace = await runCase("structural exploration", "Locate every actual cache.write(...) call under src. Report each enclosing function and its arguments. Ignore comments and string examples. Do not change files.", ["ast_grep", "hashline_read"], { first: "ast_grep" });
   assert(trace.includes("persistFirst") && trace.includes("persistSecond"), "The explanation must identify both actual callers");
-  await runCase("literal search", "Find the literal DOCGEN_READY in events.log and report its line number. Do not change files.", ["grep"]);
-  await runCase("unsupported syntax search", "Find every $accent reference in styles/theme.scss and report its line number. Do not change files.", ["grep"]);
+  const assignment = await runCase("literal in a structural question", "Where does the code assign reasoning.encrypted_content to the outgoing params.include array under src, and under what condition? Ignore examples. Do not change files.", ["ast_grep", "hashline_read"], { first: "ast_grep" });
+  assert(assignment.includes("configure") && assignment.includes("reasoning"), "Identify the actual assignment and its condition");
+  const known = await runCase("known range", "Return only the content of line 3 in known.txt. Do not change files.", ["hashline_read"], { first: "hashline_read", forbidden: ["grep", "ast_grep", "find", "ls"] });
+  assert.equal(known.trim(), "KNOWN_RANGE_OK");
+  await runCase("literal search", "Find the literal DOCGEN_READY in events.log and report its line number. Do not change files.", ["grep"], { first: "grep" });
+  await runCase("unsupported syntax search", "Find every $accent reference in styles/theme.scss and report its line number. Do not change files.", ["grep"], { first: "grep", forbidden: ["ast_grep"] });
+  const legacy = await runCase("unsupported language", "Locate the Cache.write call in legacy/source.ex and report its line number. Do not change files.", ["grep"], { forbidden: ["ast_grep"] });
+  assert(legacy.includes("3"), "Unsupported-language search must identify the call line");
   await checkFixtures();
 
-  await runCase("structural rewrite", "Replace every actual cache.write call under src with cache.save. Preserve arguments, comments, string examples, and all other content.", ["ast_edit", "write"]);
+  await runCase("structural rewrite", "Replace every actual cache.write call under src with cache.save. Preserve arguments, comments, string examples, and all other content.", ["hashline_read", "ast_edit", "write"], { ordered: ["hashline_read", "ast_edit", "write"] });
   for (const path of ["src/alpha.ts", "src/beta.ts"]) {
     const before = fixtures.get(path);
     assert(before);
     fixtures.set(path, before.replace("cache.write", "cache.save"));
   }
   await checkFixtures();
-  await runCase("context-specific edit", "In notes.md, change Draft to Ready only under the Pending heading. Preserve the Archived section and all other content.", ["read", "edit"]);
+  await runCase("single-match structural rewrite", "In src/single.ts, replace the actual console.warn call with logger.warn. Preserve its argument, comments, and string examples.", ["hashline_read", "ast_edit", "write"], { ordered: ["hashline_read", "ast_edit", "write"] });
+  fixtures.set("src/single.ts", '// console.warn("comment");\nexport const sample = \'console.warn("string")\';\nlogger.warn("actual");\n');
+  await runCase("unsupported dialect edit", "In styles/theme.scss, change the $accent definition from blue to red. Preserve all other bytes.", ["hashline_read", "hashline_edit"], { ordered: ["hashline_read", "hashline_edit"], forbidden: ["ast_edit", "ast_grep"] });
+  fixtures.set("styles/theme.scss", "$accent: red;\n.panel { color: $accent; }\n");
+  await checkFixtures();
+  await runCase("context-specific edit", "In notes.md, change Draft to Ready only under the Pending heading. Preserve the Archived section and all other content.", ["hashline_read", "hashline_edit"], { ordered: ["hashline_read", "hashline_edit"] });
   fixtures.set("notes.md", "# Status\n\n## Archived\nDraft\n\n## Pending\nReady\n");
   await checkFixtures();
 
   await session.prompt("/code-anchor off");
-  assert(!session.getActiveToolNames().includes("ast_grep"));
-  assert(!session.getActiveToolNames().includes("ast_edit"));
-  for (const name of builtinNames) {
-    assert(session.getActiveToolNames().includes(name), `Disabling CodeAnchor removed ${name}`);
-  }
+  for (const name of codeAnchorNames) assert(!session.getActiveToolNames().includes(name));
+  for (const name of ["read", "edit"]) assert(!session.getActiveToolNames().includes(name), "Off must not activate native read/edit");
+  for (const name of builtinNames) assert(session.getActiveToolNames().includes(name));
+  session.setActiveToolsByName([...session.getActiveToolNames(), "read"]);
   const fallback = await runCase("disabled structural fallback", "Find every actual cache.save(...) call under src and report its filename and arguments. Do not change files.", []);
   // When AST tools are off, native search or inspection can satisfy this small, previously inspected scope.
   assert(toolOutcomes.some(outcome => outcome.phase === phase && !outcome.failed && ["grep", "read"].includes(outcome.tool)),
@@ -142,7 +169,7 @@ try {
   assert.match(fallback, /value\W+1/u);
   assert.match(fallback, /value\W+2/u);
   await checkFixtures();
-  console.log("PASS: seven natural tasks; no task prompt named tools; all selected built-ins remained available; configured model and reasoning retained");
+  console.log("PASS: twelve natural tasks; tool order, language fallback, exact file changes, configured model, and reasoning verified");
 } catch (error) {
   console.error(JSON.stringify({
     phase,

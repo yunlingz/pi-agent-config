@@ -44,7 +44,7 @@ try {
   const events: AgentSessionEvent[] = [];
   const guard: ExtensionFactory = pi => {
     pi.on("tool_call", event => {
-      assert(["read", "edit", "write", "ast_grep", "ast_edit"].includes(event.toolName), "Unexpected tool in isolated live verification");
+      assert(["hashline_read", "hashline_edit", "read", "edit", "write", "ast_grep", "ast_edit"].includes(event.toolName), "Unexpected tool in isolated live verification");
       const inside = (value: string): void => {
         if (value === "xd://resolve" || value === "xd://reject") return;
         assert(!value.startsWith("~") && !value.includes("://"), "Unexpected resource path");
@@ -85,14 +85,14 @@ try {
   assert.equal(session.thinkingLevel, reasoning);
   const extensionErrors: unknown[] = [];
   await session.bindExtensions({ mode: "json", onError: error => extensionErrors.push(error) });
-  for (const name of ["read", "edit", "write", "ast_grep", "ast_edit"]) {
+  for (const name of ["hashline_read", "hashline_edit", "write", "ast_grep", "ast_edit"]) {
     assert(session.getActiveToolNames().includes(name), `Live setup is missing ${name}`);
   }
-  session.setActiveToolsByName(["read", "edit", "write", "ast_grep", "ast_edit"]);
+  session.setActiveToolsByName(["hashline_read", "hashline_edit", "write", "ast_grep", "ast_edit"]);
   const nativeGuidelines = [live.sdk.createReadToolDefinition(temporary), live.sdk.createEditToolDefinition(temporary), live.sdk.createWriteToolDefinition(temporary)]
     .flatMap(tool => tool.promptGuidelines ?? []);
   const codeAnchorGuidelines = session.getAllTools()
-    .filter(tool => ["read", "edit", "write", "ast_grep", "ast_edit"].includes(tool.name))
+    .filter(tool => ["hashline_read", "hashline_edit", "write", "ast_grep", "ast_edit"].includes(tool.name))
     .flatMap(tool => tool.promptGuidelines ?? []).filter(rule => !nativeGuidelines.includes(rule));
   assert(codeAnchorGuidelines.length > 0);
   const assertGuidance = (): void => {
@@ -139,7 +139,7 @@ try {
     } finally { clearTimeout(timer); }
   };
   console.log(`START: live CodeAnchor workflows on ${model.provider}/${model.id}; reasoning ${reasoning}; real requests can incur charges`);
-  await prompt("hashline read and edit", "Read fixture.ts, then use hashline edit to change only the string before to after. Preserve the marker comment and file formatting. Do not use write. Reply briefly.", ["read", "edit"]);
+  await prompt("hashline read and edit", "Use hashline_read for fixture.ts, then hashline_edit to change only the string before to after. Preserve the marker comment and file formatting. Do not use write. Reply briefly.", ["hashline_read", "hashline_edit"]);
   assert.equal(await readFile(path, "utf8"), source.replace('"before"', '"after"'));
   await prompt("structural search and preview", 'Use ast_grep to find console.log($VALUE) in fixture.ts. Then use ast_edit to stage console.log($VALUE) -> logger.info($VALUE). Do not resolve yet. Reply briefly.', ["ast_grep", "ast_edit"]);
   assert.equal(await readFile(path, "utf8"), source.replace('"before"', '"after"'));
@@ -153,11 +153,14 @@ try {
   await live.session.reload();
   assert(!live.session.getActiveToolNames().includes("ast_grep"));
   assertGuidance();
+  for (const name of ["read", "edit", "hashline_read", "hashline_edit"]) assert(!live.session.getActiveToolNames().includes(name));
+  live.session.setActiveToolsByName([...live.session.getActiveToolNames(), "read", "edit"]);
   await prompt("built-in tools after off and reload", 'Read fixture.ts, then use the built-in exact-text edit tool to change logger.info("after") to logger.warn("after"). Preserve everything else. Do not use write. Reply briefly.', ["read", "edit"]);
   assert.equal(await readFile(path, "utf8"), source.replace('console.log("before")', 'logger.warn("after")'));
   await live.session.prompt("/code-anchor on");
   assert(live.session.getActiveToolNames().includes("ast_grep"));
-  await prompt("raw read after re-enable", "Use read with path fixture.ts:raw. Reply with exactly the marker comment identifier, without // or formatting. Do not modify files.", ["read"]);
+  for (const name of ["read", "edit"]) assert(!live.session.getActiveToolNames().includes(name));
+  await prompt("raw read after re-enable", "Use hashline_read with path fixture.ts:raw. Reply with exactly the marker comment identifier, without // or formatting. Do not modify files.", ["hashline_read"]);
   assert.equal(live.session.getLastAssistantText()?.trim(), marker);
   assert.equal(await readFile(path, "utf8"), source.replace('console.log("before")', 'logger.warn("after")'));
   phase = "manual compaction, persisted file metadata, and continuation";
@@ -182,7 +185,7 @@ try {
   } finally { clearTimeout(compactionTimeout); }
   await live.session.reload();
   assertGuidance();
-  await prompt("hashline continuation after compaction and reload", "Read fixture.ts, then use hashline edit to change logger.warn to logger.error. Preserve the marker and all other bytes. Reply with exactly the marker identifier, without // or formatting.", ["read", "edit"]);
+  await prompt("hashline continuation after compaction and reload", "Use hashline_read for fixture.ts, then hashline_edit to change logger.warn to logger.error. Preserve the marker and all other bytes. Reply with exactly the marker identifier, without // or formatting.", ["hashline_read", "hashline_edit"]);
   assert.equal(live.session.getLastAssistantText()?.trim(), marker);
   assert.equal(await readFile(path, "utf8"), source.replace('console.log("before")', 'logger.error("after")'));
   assert.equal(extensionErrors.length, 0);

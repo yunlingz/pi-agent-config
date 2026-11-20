@@ -18,7 +18,7 @@ function createHealthyFixture() {
   };
   const fileText: TextContent = { type: 'text', text: marker };
   const read: Extract<VerificationEvent, { type: 'tool_execution_end' }> = {
-    type: 'tool_execution_end', toolCallId: 'read-marker', toolName: 'read', isError: false,
+    type: 'tool_execution_end', toolCallId: 'read-marker', toolName: 'hashline_read', isError: false,
     result: { content: [fileText], details: undefined },
   };
   const reply: TextContent = { type: 'text', text: marker };
@@ -63,6 +63,12 @@ test('MCP must be explicitly disabled without conflicting enable entries', () =>
 
 test('healthy session requires real read evidence and the configured model', () => {
   assert.equal(assertHealthy(createHealthyFixture().events, settings, marker), 'test/model');
+});
+
+test('native read results must not substitute for CodeAnchor reading', () => {
+  const fixture = createHealthyFixture();
+  fixture.read.toolName = 'read';
+  assert.throws(() => assertHealthy(fixture.events, settings, marker));
 });
 
 for (const missing of ['session', 'tool_execution_end', 'message_end', 'agent_settled']) {

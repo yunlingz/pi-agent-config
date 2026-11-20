@@ -38,7 +38,7 @@ export const hashlineRenderers = {
   renderCall(args: { input?: string }, theme: Theme) {
     const paths = [...new Set([...(args.input ?? "").matchAll(/^\[([^\]\n]+)#[0-9A-Fa-f]{4}\]/gmu)].flatMap(match => match[1] ? [match[1]] : []))];
     const scope = paths.length > 1 ? `${paths[0]} (+${paths.length - 1} files)` : paths[0] ?? "hashline changes";
-    return renderCall("edit", scope, theme);
+    return renderCall("hashline_edit", scope, theme);
   },
   renderResult: renderCompactResult,
 };

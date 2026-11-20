@@ -27,9 +27,9 @@ let records = 0;
 try {
   const marker = `CODE_ANCHOR_OK_${randomUUID()}`;
   await writeFile(join(temporary, "healthcheck.txt"), marker + "\n");
-  const prompt = "This is a read-only CodeAnchor verification. Use read with path healthcheck.txt:raw. Reply with exactly the file contents, without formatting or commentary. Do not invoke skills or other tools.";
+  const prompt = "This is a read-only CodeAnchor verification. Use hashline_read with path healthcheck.txt:raw. Reply with exactly the file contents, without formatting or commentary. Do not invoke skills or other tools.";
   console.log("START: CodeAnchor read-only live check; configured provider/model/reasoning; real requests can incur charges");
-  const child = spawn(process.execPath, [resolve(packageDirectory, packageInfo.bin.pi), "--mode", "json", "--no-session", "--offline", "--no-approve", "--no-mcp", "--extension", join(extensionDirectory, "extension.ts"), "--tools", "read", prompt], {
+  const child = spawn(process.execPath, [resolve(packageDirectory, packageInfo.bin.pi), "--mode", "json", "--no-session", "--offline", "--no-approve", "--no-mcp", "--extension", join(extensionDirectory, "index.ts"), "--tools", "hashline_read", prompt], {
     cwd: temporary, shell: false, stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, PI_CODING_AGENT_DIR: agentDirectory, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" },
   });
@@ -65,7 +65,7 @@ try {
     assert.equal(invalidJson, false, "Pi did not emit valid JSONL");
     assert.equal(pending.length, 0, "Pi emitted incomplete JSONL");
     const model = assertHealthy(events, settings, marker);
-    const read = events.find(event => event.type === "tool_execution_end" && event.toolName === "read");
+    const read = events.find(event => event.type === "tool_execution_end" && event.toolName === "hashline_read");
     assert(read?.type === "tool_execution_end");
     assert(read.result.content.some(block => block.type === "text" && block.text.trim() === marker), "The CodeAnchor raw selector must return the marker without anchors");
     console.log(`PASS: CodeAnchor WASM read tool, raw selector, exact marker and settled lifecycle on ${model}; configured reasoning retained`);

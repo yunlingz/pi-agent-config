@@ -44,22 +44,22 @@ export default function registerTuiFixture(pi: ExtensionAPI): void {
       };
       switch (phase) {
         case "fold":
-          if (results.length === 0) plan("read", { path: "fold.ts" });
+          if (results.length === 0) plan("hashline_read", { path: "fold.ts" });
           else if (results.length === 1) {
             const text = results[0]?.content.filter(block => block.type === "text").map(block => block.text).join("\n") ?? "";
             const tag = /\[fold\.ts#([0-9A-F]{4})\]/u.exec(text)?.[1];
             assert(tag);
             const rows = Array.from({ length: 40 }, (_, index) => `+console.warn("${index === 39 ? "FOLD_UI_TAIL" : `row_${index}`} ${"界".repeat(20)}");`);
-            plan("edit", { input: `[fold.ts#${tag}]\nPUT 1.=40:\n${rows.join("\n")}` });
+            plan("hashline_edit", { input: `[fold.ts#${tag}]\nPUT 1.=40:\n${rows.join("\n")}` });
           }
           break;
         case "hashline":
-          if (results.length === 0) plan("read", { path: "fixture.ts" });
+          if (results.length === 0) plan("hashline_read", { path: "fixture.ts" });
           else if (results.length === 1) {
             const text = results[0]?.content.filter(block => block.type === "text").map(block => block.text).join("\n") ?? "";
             const tag = /\[fixture\.ts#([0-9A-F]{4})\]/u.exec(text)?.[1];
             assert(tag, "The terminal read must supply a hashline tag");
-            plan("edit", { input: `[fixture.ts#${tag}]\nPUT 2:\n+console.log(after);` });
+            plan("hashline_edit", { input: `[fixture.ts#${tag}]\nPUT 2:\n+console.log(after);` });
           }
           break;
         case "preview":
@@ -74,7 +74,7 @@ export default function registerTuiFixture(pi: ExtensionAPI): void {
           else if (results.length === 1) plan("edit", { path: "fixture.ts", edits: [{ oldText: "logger.info(after);", newText: "logger.warn(after);" }] });
           break;
         case "raw":
-          if (results.length === 0) plan("read", { path: "fixture.ts:raw" });
+          if (results.length === 0) plan("hashline_read", { path: "fixture.ts:raw" });
           break;
         default: throw new Error("Unknown terminal fixture prompt");
       }
@@ -107,5 +107,13 @@ export default function registerTuiFixture(pi: ExtensionAPI): void {
       record({ event: "checkpoint", phase: args.trim(), mode: ctx.mode, tools: pi.getActiveTools(), expanded: ctx.ui.getToolsExpanded() });
       ctx.ui.notify(`CHECKPOINT_${args.trim()}`, "info");
     },
+  });
+  pi.registerCommand("terminal-native-tools", {
+    description: "Explicitly activate native read/edit in this isolated test",
+    async handler() { pi.setActiveTools([...pi.getActiveTools(), "read", "edit"]); }
+  });
+  pi.registerCommand("terminal-reload", {
+    description: "Reload this isolated test runtime",
+    handler: async (_args, ctx) => { await ctx.reload(); },
   });
 }

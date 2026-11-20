@@ -42,6 +42,7 @@ async function main(): Promise<void> {
     await writeFile(join(workspace, "fold.ts"), foldedSource);
     await writeFile(join(agent, "settings.json"), JSON.stringify({
       packages: [], extensions: ["-builtin:mcp"], defaultProvider: "code-anchor-tui-fixture", defaultModel: "fixture",
+      defaultTools: ["write", "grep", "find", "ls"],
       compaction: { enabled: false }, cacheWarming: "off", quietStartup: true, retry: { enabled: false },
       powerline: {
         welcome: false, git: { polling: "off" }, autoFollowUp: false,
@@ -54,7 +55,6 @@ async function main(): Promise<void> {
       "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-themes",
       "--extension", resolve(footerDirectory),
       "--extension", join(root, "tests", "tui-fixture.ts"),
-      "--tools", "read,edit,write,ast_grep,ast_edit", "--tui-mode", "fullscreen",
     ], {
       cols: 120, rows: 36, cwd: workspace, name: "xterm-256color",
       env: { ...process.env, PI_CODING_AGENT_DIR: agent, CODE_ANCHOR_TUI_DIRECTORY: workspace, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PI_PROGRAM_STATUS: "0", TERM: "xterm-256color", COLORTERM: "truecolor" },
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
     output = "";
     await prompt("fold");
     assert(!visible().includes("FOLD_UI_TAIL"), "Collapsed read/edit must not display distant source rows");
-    assert(visible().includes("edit fold.ts"), "The hashline edit header must show its target path");
+    assert(visible().includes("hashline_edit fold.ts"), "The hashline edit header must show its target path");
     output = "";
     child.write("\x0f");
     assert.equal((await checkpoint("expanded")).expanded, true);
@@ -128,11 +128,15 @@ async function main(): Promise<void> {
     await prompt("resolve");
     assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nlogger.info(after);\n");
     child.write("/code-anchor off\r");
-    assert(!(await checkpoint("off")).tools?.includes("ast_grep"));
+    const off = (await checkpoint("off")).tools ?? [];
+    for (const name of ["read", "edit", "hashline_read", "hashline_edit", "ast_grep", "ast_edit"]) assert(!off.includes(name));
     await wait("rendering the off Powerline status", () => /code-anchor:\s*off/u.test(visible()));
     child.write("/reload\r");
     await wait("reloading the actual terminal runtime", async () => (await trace()).filter(event => event.event === "session_start").length >= 2);
     assert(!(await checkpoint("reloaded")).tools?.includes("ast_edit"));
+    child.write("/terminal-native-tools\r");
+    const explicitNative = (await checkpoint("native-explicit")).tools ?? [];
+    assert(explicitNative.includes("read") && explicitNative.includes("edit"));
     await prompt("builtin");
     assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nlogger.warn(after);\n");
     const beforeResize = bytes;
@@ -141,13 +145,14 @@ async function main(): Promise<void> {
     assert.equal((await checkpoint("narrow")).mode, "tui");
     child.resize(120, 36);
     child.write("/code-anchor on\r");
-    assert((await checkpoint("enabled")).tools?.includes("ast_edit"));
+    const enabled = (await checkpoint("enabled")).tools ?? [];
+    assert(enabled.includes("ast_edit") && enabled.includes("hashline_read") && !enabled.includes("read") && !enabled.includes("edit"));
     await prompt("raw");
     const events = await trace();
     assert(!events.some(event => event.event === "network_attempt"));
     assert(events.some(event => event.event === "session_shutdown" && event.reason === "reload"));
-    assert(events.some(event => event.event === "tool_end" && event.name === "read" && event.text?.includes("[fixture.ts#")));
-    assert(events.some(event => event.event === "tool_end" && event.name === "read" && event.text === "// terminal fixture\nlogger.warn(after);\n"));
+    assert(events.some(event => event.event === "tool_end" && event.name === "hashline_read" && event.text?.includes("[fixture.ts#")));
+    assert(events.some(event => event.event === "tool_end" && event.name === "hashline_read" && event.text === "// terminal fixture\nlogger.warn(after);\n"));
     phase = "quitting the real terminal session";
     child.write("/quit\r");
     await wait("waiting for graceful terminal shutdown", () => exit !== undefined);

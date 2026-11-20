@@ -1,5 +1,5 @@
 import {
-  createEditToolDefinition, createReadToolDefinition, createWriteToolDefinition,
+  createReadToolDefinition, createWriteToolDefinition,
   detectSupportedImageMimeTypeFromFile, truncateHead, withFileMutationQueue,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
@@ -36,7 +36,7 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
   const manifest = JSON.parse(await readFile(new URL("./grammars.json", import.meta.url), "utf8")) as GrammarManifest;
   const grammarDescription = [
     `Supported grammars (${manifest.grammars.length}): ${manifest.grammars.map(grammar => grammar.name).join(", ")}.`,
-    "Language detection uses recognized filenames and extensions. JavaScript includes JSX; TSX is separate.",
+    "Language detection uses recognized filenames and extensions. JavaScript includes JSX; TypeScript and TSX use separate grammars.",
     "JSONC, JSON5, SCSS, and unlisted grammars are unsupported. Grammar support does not guarantee every dialect or syntax version parses.",
   ].join(" ");
   let client = new NativeClient(binary);
@@ -49,69 +49,104 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
   pi.on("session_shutdown", clearNativeState);
   pi.on("session_tree", clearNativeState);
   pi.on("session_before_compact", event => restoreCodeAnchorFiles(event));
+  const toolNames = ["hashline_read", "hashline_edit", "ast_grep", "ast_edit"];
+  // Pi's activation API does not retain negative --tools modifiers for dynamic registrations.
+  let cliTools: string[] = [];
+  for (let index = 2; index < process.argv.length; index++) {
+    const arg = process.argv[index];
+    if (arg === "--") break;
+    if (arg === "--tools" || arg === "-t") cliTools = (process.argv[++index] ?? "").split(",").map(value => value.trim());
+  }
+  const excluded = new Set<string>();
+  for (const name of cliTools) {
+    if (name.startsWith("-")) excluded.add(name.slice(1));
+    else if (name.startsWith("+")) excluded.delete(name.slice(1));
+  }
+  const nativeConflict = (name: string) => name === "read" || name === "edit";
+  pi.on("tool_call", event => {
+    if (enabled && nativeConflict(event.toolName)) {
+      return { block: true, reason: "CodeAnchor is on. Use hashline_read or hashline_edit instead of native read or edit." };
+    }
+  });
+  const hideNativeTools = () => {
+    if (!enabled) return;
+    const active = pi.getActiveTools();
+    if (active.some(name => nativeConflict(name) || excluded.has(name))) {
+      pi.setActiveTools(active.filter(name => !nativeConflict(name) && !excluded.has(name)));
+    }
+  };
+  pi.on("before_agent_start", hideNativeTools);
+  pi.on("tool_execution_end", hideNativeTools);
 
   const textResult = (text: string, details?: FileTrackingDetails) => {
     const output = truncateHead(text, { maxBytes: 49 * 1024, maxLines: 1900 });
-    const notice = output.truncated ? "\n\n[Output truncated. Narrow paths or use read to inspect the relevant files.]" : "";
+    const notice = output.truncated ? "\n\n[Output truncated. Narrow paths or use hashline_read to inspect the relevant files.]" : "";
     return { content: [{ type: "text" as const, text: output.content + notice }], details };
   };
 
-  function switchTools(next: boolean, context: ControlsContext): void {
-    const builtinRead = createReadToolDefinition(context.cwd);
-    const builtinEdit = createEditToolDefinition(context.cwd);
-    const builtinWrite = createWriteToolDefinition(context.cwd);
-    enabled = next;
-    if (!next) {
-      pi.registerTool(builtinRead);
-      pi.registerTool(builtinEdit);
-      pi.registerTool(builtinWrite);
-      pi.setActiveTools(pi.getActiveTools().filter(name => name !== "ast_grep" && name !== "ast_edit"));
-      return;
-    }
-    pi.registerTool({
-      name: "read", label: "Read · CodeAnchor",
-      description: "Inspect files with snapshot-tagged hashline anchors before editing. Bare code reads can summarize supported syntax. Put optional line selectors in path: :N-M, :N+K, :N-, :-N, or comma ranges. :raw returns exact text without anchors; combine it with a range. Non-raw single ranges include surrounding context and syntax boundaries. Images use Pi's standard reader. Output is limited to 2000 lines or 50KB.",
-      promptSnippet: "Inspect files and obtain snapshot-tagged hashline anchors",
+  function registerTools(cwd: string): void {
+    const builtinRead = createReadToolDefinition(cwd);
+    const builtinWrite = createWriteToolDefinition(cwd);
+    const readParameters = Type.Object({
+      path: Type.String(),
+      offset: Type.Optional(Type.Integer({ minimum: 1 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1 })),
+    });
+    pi.registerTool<typeof readParameters, FileTrackingDetails>({
+      name: "hashline_read", label: "Hashline Read · CodeAnchor",
+      description: "Read files with snapshot-tagged line anchors. If the file and relevant lines are known, open that range directly. Text reading does not require AST grammar support. Bare code reads can summarize supported syntax; unsupported syntax remains ordinary text. Inspect relevant implementations before editing. For hashline_edit, obtain current snapshot tags and line anchors from hashline_read. Put optional line selectors in path: :N-M, :N+K, :N-, :-N, or comma ranges. :raw returns exact text without anchors; combine it with a range. Non-raw single ranges include surrounding context and supported syntax boundaries. Images use Pi's standard reader. Output is limited to 2000 lines or 50KB.",
+      promptSnippet: "Inspect known file ranges directly and obtain snapshot-tagged anchors for hashline edits",
       promptGuidelines: [
-        "Use read to inspect implementations, control flow, arguments, and data transformations after structural or text searches.",
-        "When relevant paths are known, use read or ast_grep directly instead of discovering files again.",
-        "Use read before edit or ast_edit. For hashline edit, copy the latest [path#TAG] header and source line numbers.",
-        "A bare read can summarize code. Re-read needed omitted ranges; never invent hidden source or anchors.",
-        "When practical, batch independent read calls.",
+        "Use hashline_read to inspect implementations, control flow, arguments, and data transformations after structural or text searches.",
+        "When the file and relevant lines are known, use hashline_read directly without repeated discovery or search.",
+        "Use hashline_read for text files even when AST tools do not support their language or syntax.",
+        "Use hashline_read before hashline_edit or ast_edit. For hashline_edit, copy its latest [path#TAG] header and source line numbers.",
+        "If hashline_read summarizes needed source, open the omitted ranges. Never infer hidden source or invent anchors.",
+        "When practical, batch independent hashline_read calls.",
       ],
-      parameters: Type.Object({
-        path: Type.String(),
-        offset: Type.Optional(Type.Integer({ minimum: 1 })),
-        limit: Type.Optional(Type.Integer({ minimum: 1 })),
-      }),
+      renderCall(args, theme) {
+        const range = args.offset === undefined ? "" : `:${args.offset}${args.limit === undefined ? "-" : `+${args.limit}`}`;
+        return new Text(`${theme.fg("toolTitle", theme.bold("hashline_read"))} ${theme.fg("accent", args.path)}${range}`, 0, 0);
+      },
+      renderResult(result, options, theme, context) {
+        return builtinRead.renderResult?.({ ...result, details: undefined }, options, theme, context) ?? new Text("", 0, 0);
+      },
+      parameters: readParameters,
       executionMode: "sequential",
       async execute(id, params, signal, onUpdate, ctx) {
+        if (!enabled) throw new Error("CodeAnchor is off");
         const path = filePath(params.path, ctx.cwd);
         const metadata = await stat(path).catch((error: unknown) => {
           if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
           throw error;
         });
         if (metadata && !metadata.isFile()) throw new Error("The read target must be a regular file");
-        if (metadata && await detectSupportedImageMimeTypeFromFile(path)) return createReadToolDefinition(ctx.cwd).execute(id, params, signal, onUpdate, ctx);
+        if (metadata && await detectSupportedImageMimeTypeFromFile(path)) {
+          const result = await createReadToolDefinition(ctx.cwd).execute(id, params, signal, undefined, ctx);
+          return { ...result, details: fileTracking([path], []) };
+        }
         const result = JSON.parse(await client.request({ action: "read", path, display: params.path, offset: params.offset, limit: params.limit }, signal)) as NativeRead;
         return { content: [{ type: "text", text: result.text }], details: fileTracking([filePath(result.path, ctx.cwd)], [], [params.path]) };
       },
     });
     pi.registerTool({
-      name: "edit", label: "Edit · CodeAnchor",
-      description: "Apply snapshot-checked hashline edits for context-specific changes. When supported syntax defines both targets and transformation, prefer ast_edit. Input starts with [path#TAG]. PUT N.=M: replaces lines with +payload rows; PUT <N: or PUT >N: inserts; CUT N.=M deletes; N* selects a syntax block. PUT >$: appends. CUT ranges and PUT targets can use @register. REM deletes a file; MV path moves it. Use write to create files.",
-      promptSnippet: "Apply context-specific changes with snapshot-checked hashline anchors",
+      name: "hashline_edit", label: "Hashline Edit · CodeAnchor",
+      description: "Apply snapshot-checked edits to text files. Use hashline_edit for unsupported syntax and changes that depend on local context, comments, prose, or surrounding lines. Obtain current snapshot tags and line anchors from hashline_read. When supported syntax accurately defines the target and replacement, prefer ast_edit, even for one occurrence. Input starts with [path#TAG]. PUT N.=M: replaces lines with +payload rows; PUT <N: or PUT >N: inserts; CUT N.=M deletes. N* selects a syntax block when supported. PUT >$: appends. CUT ranges and PUT targets can use @register. REM deletes a file; MV path moves it. Use Pi's file-writing tool (write) to create files.",
+      promptSnippet: "Edit unsupported syntax or context-dependent content using current hashline anchors",
       promptGuidelines: [
-        "Use edit for context-specific code, local control flow, prose, comments, and exact-line changes.",
-        "For edit, use current snapshot tags and source line numbers from read. Batch related operations under one file header.",
-        "Never invent edit tags or omitted source. When edit reports stale anchors, re-read the affected range before retrying.",
-        "When ast_edit is unsupported or unreliable, inspect current source with read and use hashline edit.",
-        "For edit, select the smallest correct change. Match count alone must not determine whether to use ast_edit.",
-        "After edit, review the resulting diff and run applicable checks. Edit application does not prove behavioral correctness.",
+        "Use hashline_edit for unsupported syntax, context-specific code, local control flow, prose, comments, and exact-line changes.",
+        "For hashline_edit, use current snapshot tags and source line numbers from hashline_read. Batch related operations under one file header.",
+        "Never invent hashline_edit tags or omitted source. When stale anchors fail, open the affected range with hashline_read before retrying.",
+        "For unsupported syntax-block selectors, use ordinary line operations with hashline_edit.",
+        "When ast_edit is unsupported or unreliable, inspect current source with hashline_read and use hashline_edit.",
+        "For hashline_edit, select the smallest correct change. Match count alone must not determine the editing tool.",
+        "After hashline_edit, review the resulting diff and run applicable checks. Applying edits does not prove behavioral correctness.",
+        "When CodeAnchor is on, do not use native read or edit instead of hashline_read or hashline_edit.",
       ],
       parameters: Type.Object({ input: Type.String({ minLength: 1 }) }),
       executionMode: "sequential",
       async execute(_id, params, signal, _update, ctx) {
+        if (!enabled) throw new Error("CodeAnchor is off");
         const request = { input: params.input, cwd: ctx.cwd, home: homedir() };
         const paths = JSON.parse(await client.request({ action: "inspect", ...request }, signal)) as string[];
         return lockFiles(paths, async () => {
@@ -128,30 +163,32 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
     });
     pi.registerTool({
       name: "ast_grep", label: "AST Grep · CodeAnchor",
-      description: `When supported, prefer structural search for calls, constructors, imports, declarations, assignments, and repeated syntax. Prefer Pi's grep for text and unsupported syntax. Use $NAME for one capture and $$$NAME for multiple nodes. Paths accept files, directories, or globs; separate targets with semicolons. Returns 50 matches per page. ${grammarDescription}`,
-      promptSnippet: "Prefer structural patterns for supported code exploration and call tracing",
+      description: `For supported languages and syntax, prefer ast_grep to locate calls, constructors, imports, declarations, assignments, and repeated syntax. Search for the structure that performs the action, even when the question names a literal. For unsupported or unreliable syntax, use text search instead. Do not force an unrelated grammar onto an unsupported file. Use $NAME for one capture and $$$NAME for multiple nodes. Paths accept files, directories, or globs; separate targets with semicolons. Returns 50 matches per page. ${grammarDescription}`,
+      promptSnippet: "Locate code by structure when supported; otherwise follow the text-search fallback order",
       promptGuidelines: [
-        "When ast_grep supports the language and syntax, prefer it for structural questions during explanations, investigations, reviews, and implementation.",
-        "Use ast_grep for calls, constructors, imports, declarations, assignments, and repeated syntax. Use captures to express the intended structure.",
-        "Do not replace ast_grep with text search merely because an identifier can also appear in text matches.",
-        "Use ls for immediate directory contents and find for filename or path globs. Known paths can go directly to ast_grep or read.",
-        "When discovery tools are unavailable or insufficient, run rg --files through an available command-execution tool.",
-        "Prefer Pi's grep for prose, comments, literal strings, configuration keys, log messages, and regular-expression searches.",
-        "When ast_grep is unsupported or remains unreliable, use grep for code search and read to inspect relevant results.",
-        "When grep is unavailable or lacks required options, run rg through an available command-execution tool.",
-        "For committed files outside the checkout, use git grep through an available command-execution tool.",
-        "For rg and git grep, follow active execution restrictions. Do not assume a shell is available.",
+        "Check ast_grep's advertised grammar scope before structural search; unsupported languages and dialects require text search.",
+        "When ast_grep supports the language and syntax, prefer it during explanations, investigations, reviews, and implementation.",
+        "Use ast_grep for calls, constructors, imports, declarations, assignments, and repeated syntax. Express the intended structure with captures.",
+        "For assignment questions, use ast_grep with an assignment pattern such as params.include = $VALUE, not literal mentions.",
+        "Do not replace ast_grep with text search merely because the question names an identifier or literal.",
+        "Use text search for prose, comments, literal occurrences, configuration keys, log messages, and regular-expression searches.",
+        "Prefer Pi's built-in text-search tool (grep). If unavailable or insufficient, try ripgrep (rg) through an available command-execution tool.",
+        "If ripgrep is unavailable or insufficient, use another available text-search method. Follow execution restrictions; do not assume shell access.",
+        "When ast_grep is unsupported or remains unreliable, follow that text-search fallback order and inspect results with hashline_read.",
+        "For discovery, prefer Pi's directory-listing tool (ls) and filename-search tool (find) when available; inspect known ranges with hashline_read.",
+        "When discovery tools are unavailable or insufficient, try rg --files through an available command-execution tool.",
+        "For committed files outside the checkout, use git grep through an available command-execution tool within active execution restrictions.",
         "Determine ast_grep grammar support from active descriptions or bundled metadata, not assumptions about Tree-sitter support.",
-        "Narrow ast_grep paths. For mixed-language directories, use suitable globs or automatic detection; do not force one grammar onto unrelated files.",
-        "When expected ast_grep matches are absent, check path, language, and pattern. Try a focused correction before text-search fallback.",
-        "Do not repeat unchanged failing ast_grep queries. Choose ast_grep for useful evidence, not tool-call counts or a fixed sequence.",
+        "Narrow ast_grep paths. Use suitable globs or automatic detection for mixed-language directories; do not force an unrelated grammar.",
+        "When expected ast_grep matches are absent, check path, language, and pattern before one focused correction or text-search fallback.",
+        "Do not repeat unchanged failing ast_grep queries. Choose useful evidence, not tool-call counts or a fixed sequence.",
         "Treat ast_grep matches as syntax evidence, not type-resolved references or complete call graphs. Disclose material coverage gaps.",
-        "When ast_grep coverage is uncertain, zero matches do not prove absence.",
+        "When ast_grep coverage is uncertain, zero matches do not prove absence. Inspect relevant results with hashline_read.",
       ],
       parameters: Type.Object({
         pat: Type.String({ minLength: 1 }),
         path: Type.Optional(Type.String()),
-        lang: Type.Optional(Type.String({ description: "Optional supported grammar name or alias; omitted means filename/extension detection. Applies to every selected file; narrow mixed-language paths." })),
+        lang: Type.Optional(Type.String({ description: "Optional supported grammar name or alias. If omitted, detect language from filenames. An explicit grammar applies to every selected file; narrow mixed-language paths." })),
         skip: Type.Optional(Type.Integer({ minimum: 0 })),
       }),
       executionMode: "sequential",
@@ -165,16 +202,17 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
     });
     pi.registerTool({
       name: "ast_edit", label: "AST Edit · CodeAnchor",
-      description: `Prefer staged structural rewrites when syntax defines the targets and transformation, even for one occurrence. Use hashline edit for context-specific changes. Supply ops [{pat,out}] and paths. No files change during preview. Changed preview sources are rejected before writes. To apply, write a reason to xd://resolve; to discard, write a reason to xd://reject. ${grammarDescription}`,
-      promptSnippet: "Preview syntax-defined transformations; use hashline edit for context-specific changes",
+      description: `For supported languages and syntax, prefer ast_edit when syntax defines both the target and replacement, even for one occurrence. Inspect relevant source with hashline_read before staging. For unsupported syntax or context-dependent changes, use hashline_edit. Do not force a grammar or apply an unreliable structural match. Language detection follows the selected paths. Supply ops [{pat,out}] and paths. No files change during preview. Changed preview sources are rejected before writes. To apply, use Pi's file-writing tool (write) with a reason at xd://resolve; to discard, use xd://reject. ${grammarDescription}`,
+      promptSnippet: "Preview supported syntax-defined rewrites, including single matches; use hashline_edit otherwise",
       promptGuidelines: [
+        "Check ast_edit's language and syntax support before structural rewriting; use hashline_read and hashline_edit when unsupported or unreliable.",
         "When supported syntax accurately defines both targets and transformation, prefer ast_edit, even for one occurrence.",
         "For ast_edit, select the smallest correct change. Match count alone must not determine the tool.",
-        "Read relevant implementations before staging ast_edit. Before unfamiliar or broad rewrites, inspect the pattern with ast_grep.",
+        "Inspect relevant implementations with hashline_read before ast_edit. Before unfamiliar or broad rewrites, inspect the pattern with ast_grep.",
         "Restrict ast_edit paths and captures to authorized targets. Identical names need not identify the same symbol.",
         "Use ast_grep, not ast_edit, for read-only exploration.",
         "Review every ast_edit preview location, replacement, comment, and formatting change. Narrow unintended matches before applying.",
-        "When an ast_edit preview becomes stale, inspect current source and stage a new preview before resolving.",
+        "When an ast_edit preview becomes stale, inspect current source with hashline_read and stage a new preview before resolving.",
         "Apply or discard a pending ast_edit preview before another editing method changes its affected files.",
         "After ast_edit resolution, review the resulting diff and run applicable checks. Successful matching does not prove behavioral correctness.",
       ],
@@ -184,7 +222,7 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
         if (!enabled) throw new Error("CodeAnchor is off");
         const result = JSON.parse(await client.request({ action: "preview", paths: params.paths, cwd: ctx.cwd, operations: params.ops.map(op => ({ pattern: op.pat, replacement: op.out })) }, signal)) as NativePlan;
         const preview = result.files.map(file => `[${file.display}${file.tag ? `#${file.tag}` : ""}]\n${file.diff}`).join("\n\n");
-        return textResult([result.files.length ? "Preview only; no files were modified. Use write to xd://resolve or xd://reject." : "No replacements made.", preview, `${result.totalReplacements} replacements in ${result.files.length} files.`, ...(result.limitReached ? ["File limit reached. Narrow paths and generate a new preview before applying."] : []), ...result.warnings].filter(Boolean).join("\n\n"), fileTracking(result.files.map(file => file.path), []));
+        return textResult([result.files.length ? "Preview only; no files were modified. Use Pi's write tool with a reason at xd://resolve or xd://reject." : "No replacements made.", preview, `${result.totalReplacements} replacements in ${result.files.length} files.`, ...(result.limitReached ? ["File limit reached. Narrow paths and generate a new preview before applying."] : []), ...result.warnings].filter(Boolean).join("\n\n"), fileTracking(result.files.map(file => file.path), []));
       },
       ...astEditRenderers,
     });
@@ -217,7 +255,18 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
         });
       },
     });
-    pi.setActiveTools([...new Set([...pi.getActiveTools(), "read", "edit", "write", "ast_grep", "ast_edit"])]);
+  }
+  registerTools(process.cwd());
+  function switchTools(next: boolean, context: ControlsContext): void {
+    const active = pi.getActiveTools();
+    enabled = next;
+    if (next) {
+      registerTools(context.cwd);
+      pi.setActiveTools([...new Set([...active.filter(name => !nativeConflict(name)), ...toolNames])].filter(name => !excluded.has(name)));
+    } else {
+      pi.registerTool(createWriteToolDefinition(context.cwd));
+      pi.setActiveTools(active.filter(name => !toolNames.includes(name) && !excluded.has(name)));
+    }
   }
   registerControls({
     on(name, handler) {

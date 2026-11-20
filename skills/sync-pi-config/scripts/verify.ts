@@ -82,7 +82,7 @@ export function assertHealthy(events: VerificationEvent[], settings: Verificatio
   const readSucceeded = events.some(
     (event) =>
       event.type === 'tool_execution_end' &&
-      event.toolName === 'read' &&
+      event.toolName === 'hashline_read' &&
       !event.isError &&
       event.result?.content?.some((block) => block.type === 'text' && block.text?.includes(marker)),
   );
@@ -144,7 +144,7 @@ export function assertHealthy(events: VerificationEvent[], settings: Verificatio
 async function runSession(packageDir: string, packageInfo: PackageInfo, agentDir: string, cwd: string, onRecord: () => void): Promise<VerificationEvent[]> {
   const prompt = [
     'This is a read-only configuration smoke test.',
-    'Use the read tool to read healthcheck.txt in the current directory.',
+    'Use the hashline_read tool to read healthcheck.txt in the current directory.',
     'Reply with exactly the file contents, without formatting or commentary.',
     'Do not invoke skills or run any other tasks.',
   ].join(' ');
@@ -157,7 +157,7 @@ async function runSession(packageDir: string, packageInfo: PackageInfo, agentDir
     '--no-approve',
     '--no-mcp',
     '--tools',
-    'read',
+    'hashline_read',
     prompt,
   ];
   const child = spawn(process.execPath, args, {
@@ -297,7 +297,7 @@ async function main() {
     });
     const model = assertHealthy(events, settings, marker);
     log(
-      `PASS: real session on ${model}; ` + 'read tool, exact reply, and settled lifecycle verified',
+      `PASS: real session on ${model}; ` + 'hashline_read, exact reply, and settled lifecycle verified',
     );
   } finally {
     clearInterval(heartbeat);

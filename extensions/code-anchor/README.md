@@ -73,20 +73,23 @@ Host filesystem functions retain the user's real permissions; WASM does not make
 
 ## Tools and controls
 
-When on, CodeAnchor overrides `read` and `edit` and adds `ast_grep` and `ast_edit`.
+When on, CodeAnchor registers `hashline_read`, `hashline_edit`, `ast_grep`, and `ast_edit` as distinct tools.
+It disables and blocks native `read` and `edit`, including calls through Pi's nested tool pipeline.
+Pi's `defaultTools` selects `write`, `grep`, `find`, and `ls`; CodeAnchor manages its own tools.
 Ordinary `write` operations remain Pi operations; the adapter handles staged AST resolution URLs.
 Local read paths accept single ranges, range lists, tails, open ranges, and `:raw` compounds.
 Bare code reads use the pinned structural summarizer for eligible long files.
 Summary omissions are not counted as displayed edit anchors; the footer gives concrete ranges to re-read.
 
-Tool metadata favors AST search for supported code structures and hashline edits for context-specific changes.
-Syntax-defined transformations use staged AST rewrites, including single-occurrence changes.
-Pi's `grep`, `find`, and `ls` are preferred over command execution for text search and file discovery.
-When native tools cannot meet the requirement, command execution supplies `rg` or `rg --files` within active execution restrictions.
-Tool descriptions and active prompt guidelines carry CodeAnchor's search, inspection, editing, and recovery procedures.
-The extension does not block or rewrite shell commands to enforce tool preferences.
-When CodeAnchor is disabled, its tool-specific prompt guidelines leave Pi's prompt with the overridden definitions.
-Native Pi renderers handle reads and ordinary writes, including their collapsed and expanded views.
+Known file ranges use `hashline_read` directly. Supported code structures use `ast_grep`, followed by source inspection.
+Unsupported languages and dialects use text search and hashline reading or editing, without a forced related grammar.
+Syntax-defined transformations use `ast_edit`, including single-occurrence changes; context-dependent changes use `hashline_edit` with current anchors.
+Text search prefers Pi's built-in `grep`, then ripgrep (`rg`) through available execution, then another available method.
+File discovery prefers Pi's `find` and `ls`; `rg --files` is the fallback when those tools cannot meet the requirement.
+Tool descriptions and active prompt guidelines carry the full selection, inspection, editing, and recovery rules.
+These search recommendations do not assume shell access or install search programs automatically.
+When off, CodeAnchor disables its four tools and restores native `write` metadata without activating native `read` or `edit`.
+Native read and write renderers still handle their corresponding results, including collapsed and expanded views.
 Hashline edits, AST results, and AST resolution use ten-row previews with Pi's expansion shortcut.
 Preview limits count wrapped terminal rows; expanded views retain the complete tool result.
 Hashline edit headers show target paths instead of the native edit tool's incompatible argument placeholder.
@@ -95,7 +98,7 @@ UI folding does not change model-facing content, anchors, file tracking, or exis
 - `/code-anchor` toggles the extension.
 - `/code-anchor on`, `/code-anchor off`, and `/code-anchor status` are explicit forms.
 - New sessions default to on. The active branch stores the preference across reloads.
-- When off, CodeAnchor restores Pi's built-in `read`, `edit`, and `write` definitions and deactivates both AST tools.
+- When off, the native `read`/`edit` guard is inactive. Native tools require explicit selection and remain separate from CodeAnchor.
 - Powerline shows `code-anchor: on` or `code-anchor: off` in its dedicated item.
 
 `ast_edit` previews changes without writing.
@@ -188,17 +191,18 @@ It also performs native manual compaction, checks persisted file metadata, reloa
 Its temporary project settings retain no recent history for that compaction case; global settings remain unchanged.
 Live tests use temporary fixtures and retain the configured provider, model, and reasoning level.
 They do not certify every model-generated edit.
-`scripts/verify-tool-selection.ts` checks natural tool choice without global instructions, with all seven selected built-ins and both AST tools available.
-Its task prompts do not name tools; assertions cover discovery, structural/text search, unsupported syntax, both editing methods, and disabled AST fallback.
+`scripts/verify-tool-selection.ts` checks twelve natural tasks without global instructions or tool names in task prompts.
+It checks tool order, known ranges, misleading literals, unsupported syntax, both editing methods, and explicitly selected native fallback.
+`verify-tool-policy.ts` checks actual Pi CLI activation, restrictions, reload, and resumed native loadouts without external model requests.
 Integration checks cover guidance from all five CodeAnchor tool definitions in Pi's prompt and local provider requests.
-They also check guidance removal and exact native-definition restoration when disabled, plus guidance restoration after re-enable and reload.
+They check guidance removal, unchanged native `read`/`edit` definitions, and native `write` restoration when off, plus guidance restoration after re-enable and reload.
 The live session verifier checks active guidance after real manual compaction and reload.
 The integration verifier also renders actual tool results through Pi's renderer resolution and tool component.
 It checks folding, expansion, resizing, wide characters, target headers, and unchanged model-facing results at 24, 60, and 120 columns.
 
 `verify-tui.ts` starts the actual Pi CLI through an existing `node-pty` installation and loads the installed Powerline extension.
 The test uses automatic CodeAnchor discovery, isolated settings, synthetic source, a local fixture provider, and no credentials or network requests.
-It verifies real keyboard commands, tool results, on/off status output, reload preference, built-in tool restoration, resizing, and shutdown.
+It verifies real keyboard commands, tool results, on/off status, reload, explicit native fallback, resizing, and shutdown.
 The checked sizes are 120 columns by 36 rows and 60 columns by 24 rows in full-screen mode.
 Assertions inspect terminal output, lifecycle events, and filesystem bytes. Human visual review and other terminal emulators remain unverified.
 On WSL, the same verifier passed through the installed util-linux `script` command and a disposable Node terminal driver.
