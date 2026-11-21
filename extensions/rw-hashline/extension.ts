@@ -6,7 +6,7 @@ import {
   type EditToolInput, type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type, type Static } from "typebox";
+import { Type } from "typebox";
 import { constants } from "node:fs";
 import { access, open, readFile, realpath, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -21,8 +21,12 @@ type EditDetails = EditToolDetails & FileDetails;
 type NativeEditState = Parameters<NonNullable<ReturnType<typeof createEditToolDefinition>["renderCall"]>>[2]["state"];
 interface EditState { native: NativeEditState; previewKey?: string }
 const normalized = (text: string) => text.replace(/^\uFEFF/u, "").replace(/\r\n?/gu, "\n");
-// Tracking must not turn a successful native read or edit into an error.
+// Tracking must not turn a successful native read into an error.
 const canonicalPath = (path: string) => realpath(path).catch(() => path);
+
+function editTitle(input: string, complete: boolean): string {
+  return input ? "hashline_edit · lines" : complete ? "hashline_edit · unsupported input" : "hashline_edit";
+}
 
 function renamedTheme(theme: Theme, from: string, to: string): Theme {
   return new Proxy(theme, {
@@ -42,11 +46,9 @@ export default function registerRwHashline(pi: ExtensionAPI): void {
     ...nativeRead.parameters.properties,
     raw: Type.Optional(Type.Boolean({ description: "Return native text without line anchors. Images and structured results always retain native behavior." })),
   }, { additionalProperties: false });
-  const editParameters = Type.Union([
-    Type.Object({ input: Type.String({ minLength: 1, description: "A line-edit document. Copy the quoted [path#TAG] header from hashline_read. Use PUT N.=M:, PUT <N:, PUT >N:, PUT >$:, or CUT N.=M. PUT body rows start with +. Multiple files use separate headers." }) }, { additionalProperties: false }),
-    nativeEdit.parameters,
-  ]);
-  type EditInput = Static<typeof editParameters>;
+  const editParameters = Type.Object({
+    input: Type.String({ minLength: 1, description: "A snapshot-checked line-edit document. Copy the quoted [path#TAG] header from hashline_read. Use PUT N.=M:, PUT <N:, PUT >N:, PUT >$:, or CUT N.=M. PUT body rows start with +. Multiple files use separate headers. Exact-text arguments are not supported." }),
+  }, { additionalProperties: false });
 
   const remember = (snapshot: Snapshot): Snapshot => {
     const previous = snapshots.get(snapshot.path);
@@ -284,38 +286,23 @@ export default function registerRwHashline(pi: ExtensionAPI): void {
     };
     return next(0);
   };
-  pi.registerTool<typeof editParameters, EditDetails | undefined, EditState>({
-    name: "hashline_edit", label: "Hashline Edit", parameters: editParameters,
-    description: "Edit existing files with snapshot-checked PUT/CUT line documents, or native exact-text edits using path and edits[]. Line payloads are literal; there is no AST parser, auto-repair, clipboard, rename, or file-delete operation. Exact-text edits preserve native matching, errors, newline handling, and diff metadata. Use write for new files and complete rewrites.",
-    promptSnippet: "Apply literal line edits or native-compatible exact-text replacements",
+  pi.registerTool<typeof editParameters, EditDetails, EditState>({
+    name: "hashline_edit", label: "Hashline Edit · Lines", parameters: editParameters,
+    description: "Edit existing files only with snapshot-checked PUT/CUT line documents. Current file headers and displayed original lines are required. Payloads are literal. There is no exact-text replacement, AST parser, auto-repair, clipboard, rename, or file-delete operation. Use write only for new files and justified complete rewrites.",
+    promptSnippet: "Apply literal line edits with mandatory snapshot anchors",
     promptGuidelines: [
-      "Use hashline_read before hashline_edit. Line documents must use its current header and displayed original line numbers.",
+      "Use hashline_read before every hashline_edit. Copy the current file header and displayed original line numbers.",
       "Use +payload rows as final content. Batch disjoint operations under one header; do not overlap ranges.",
-      "Use hashline_edit with path and edits[] for substring edits, very long lines, and notebook JSON.",
-      "After hashline_edit, inspect the diff and run applicable checks. Read fresh anchors before the next line edit.",
-      "Do not switch edit forms or use write to bypass a failed snapshot or safety check. Re-read and correct the request.",
+      "For substring changes, replace complete affected lines using current hashline anchors.",
+      "After hashline_edit, inspect the diff and run applicable checks. Read fresh anchors before the next edit.",
+      "Do not bypass missing anchors with write, native edit, scripts, or another editing form.",
+      "If a required line is truncated or undisplayed, stop and report the limitation.",
     ],
     constrainedSampling: nativeEdit.constrainedSampling,
     renderShell: nativeEdit.renderShell,
     executionMode: "sequential",
-    prepareArguments(input) {
-      if (input && typeof input === "object" && "input" in input) return input as EditInput;
-      return (nativeEdit.prepareArguments?.(input) ?? input) as EditInput;
-    },
-    async execute(id, params, signal, update, ctx) {
+    async execute(_id, params, signal, _update, ctx) {
       if (!enabled) throw new Error("rw-hashline is off.");
-      if (!("input" in params)) {
-        let path: string | undefined;
-        const tool = createEditToolDefinition(ctx.cwd, { operations: {
-          access: target => access(target, constants.R_OK | constants.W_OK),
-          async readFile(target) { path = await canonicalPath(target); return readFile(target); },
-          async writeFile(target, content) { await writeFile(target, content, "utf8"); if (path) snapshots.delete(path); },
-        } });
-        const result = await tool.execute(id, params, signal, update ? partial => update({
-          ...partial, details: partial.details ? { ...partial.details, rwHashline: { read: [], edited: path ? [path] : [] } } : undefined,
-        }) : undefined, ctx);
-        return { ...result, details: result.details ? { ...result.details, rwHashline: { read: [], edited: path ? [path] : [] } } : undefined };
-      }
       const paths = await Promise.all(parsePatch(params.input).map(section => realpath(resolvePath(section.path, ctx.cwd))));
       return lock([...new Set(paths)].sort(), async () => {
         signal?.throwIfAborted();
@@ -342,14 +329,14 @@ export default function registerRwHashline(pi: ExtensionAPI): void {
     },
     renderCall(args, theme, ctx) {
       ctx.state.native ??= {};
+      const input = typeof args.input === "string" ? args.input : "";
       let display: EditToolInput;
-      if ("input" in args) {
-        try { display = { path: parsePatch(args.input)[0]?.path ?? "hashline changes", edits: [] }; }
-        catch { display = { path: "hashline changes", edits: [] }; }
-      } else display = args;
-      const component = nativeEdit.renderCall?.(display, renamedTheme(theme, "edit", "hashline_edit"), { ...ctx, state: ctx.state.native, args: display }) ?? new Text("hashline_edit", 0, 0);
-      if ("input" in args && ctx.argsComplete && !ctx.executionStarted && ctx.state.previewKey !== args.input) {
-        const key = args.input;
+      try { display = { path: parsePatch(input)[0]?.path ?? "hashline changes", edits: [] }; }
+      catch { display = { path: "hashline changes", edits: [] }; }
+      const title = editTitle(input, ctx.argsComplete);
+      const component = nativeEdit.renderCall?.(display, renamedTheme(theme, "edit", title), { ...ctx, state: ctx.state.native, args: display }) ?? new Text(title, 0, 0);
+      if (input && ctx.argsComplete && !ctx.executionStarted && ctx.state.previewKey !== input) {
+        const key = input;
         ctx.state.previewKey = key;
         void plans(key, ctx.cwd).then(files => {
           if (ctx.state.previewKey !== key) return;
@@ -369,11 +356,10 @@ export default function registerRwHashline(pi: ExtensionAPI): void {
       ctx.state.native ??= {};
       if (!options.isPartial) ctx.state.previewKey = undefined;
       let display: EditToolInput;
-      if ("input" in ctx.args) {
-        try { display = { path: parsePatch(ctx.args.input)[0]?.path ?? "hashline changes", edits: [] }; }
-        catch { display = { path: "hashline changes", edits: [] }; }
-      } else display = ctx.args;
-      return nativeEdit.renderResult?.(result, options, theme, { ...ctx, state: ctx.state.native, args: display }) ?? new Text("", 0, 0);
+      try { display = { path: parsePatch(ctx.args.input ?? "")[0]?.path ?? "hashline changes", edits: [] }; }
+      catch { display = { path: "hashline changes", edits: [] }; }
+      const input = typeof ctx.args.input === "string" ? ctx.args.input : "";
+      return nativeEdit.renderResult?.(result, options, renamedTheme(theme, "edit", editTitle(input, ctx.argsComplete)), { ...ctx, state: ctx.state.native, args: display }) ?? new Text("", 0, 0);
     },
   });
 }

@@ -9,6 +9,7 @@ import type { AgentSession, ReadToolInput } from "@earendil-works/pi-coding-agen
 import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import { resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { testTUI, testUI } from "../../scripts/test-fixtures.ts";
+import { header, type Snapshot } from "./hashline.ts";
 
 const installation = process.argv[2];
 assert(installation, "Usage: node verify-integration.ts <installed-pi-package-directory>");
@@ -106,34 +107,47 @@ try {
   await writeFile(widePath, "x".repeat(60 * 1024) + "-before\n");
   const wide = await read({ path: widePath });
   assert.deepEqual(wide.content, (await nativeRead.execute("wide-native", { path: widePath }, undefined, undefined, ctx)).content);
-  const exactFixtures: [string, string, string, string][] = [
-    ["ordinary", "prefix before suffix\n", "before", "after"],
-    ["mixed", "head\nbefore\r\nkeep\r\ntail\n", "before", "after"],
-    ["classic-cr", "head\rbefore\rtail\r", "before", "after"],
-    ["bom", "\uFEFFbefore\r\nkeep\n", "before", "after"],
-    ["final-newline", "before\n", "before\n", "before"],
-    ["unterminated", "before", "before", "after"],
-    ["fuzzy", "“before”  \nkeep—unchanged  \n", '"before"', '"after"'],
-    ["unicode", "α😀before界\n", "before", "after"],
-    ["duplicate-payload", "A\nB\nC\nD\n", "B\nC", "A\nB2\nC2"],
-    ["indentation", "function f() {\n  first();\n  second();\n}\n", "  first();\n  second();", "first();\nsecond();"],
-    ["wide", "x".repeat(60 * 1024) + "-before\n", "before", "after"],
+  const unchangedText = await readFile(textPath);
+  const currentHeader = await readHeader(textPath);
+  const unsupportedInputs: ToolCall["arguments"][] = [
+    { path: textPath, edits: [{ oldText: "one", newText: "ONE" }] },
+    { path: textPath, oldText: "one", newText: "ONE" },
+    { path: textPath, edits: { oldText: "one", newText: "ONE" } },
+    { path: textPath, edits: JSON.stringify([{ oldText: "one", newText: "ONE" }]) },
+    { input: `${currentHeader}\nPUT 1:\n+ONE`, path: textPath },
+    { input: `${currentHeader}\nPUT 1:\n+ONE`, edits: [{ oldText: "one", newText: "ONE" }] },
+    { input: JSON.stringify({ path: textPath, edits: [{ oldText: "one", newText: "ONE" }] }) },
   ];
-  for (const [name, source, oldText, newText] of exactFixtures) {
+  assert.equal(hashEdit.prepareArguments, undefined, "There must be no exact-text or legacy argument preparation.");
+  for (const args of unsupportedInputs) {
+    assert((await invoke("hashline_edit", args)).isError, "Every unsupported editing form must reject before writing.");
+    assert((await readFile(textPath)).equals(unchangedText));
+  }
+  // The actual reader supplies this controlled details contract, including its unseen range.
+  const wideSnapshot = (wide.details as { rwHashline: { snapshot: Snapshot } }).rwHashline.snapshot;
+  assert(wideSnapshot);
+  assert((await invoke("hashline_edit", { input: `${header(wideSnapshot.path, wideSnapshot.digest)}\nPUT 1:\n+after` })).isError);
+  assert.equal(await readFile(widePath, "utf8"), "x".repeat(60 * 1024) + "-before\n");
+  const lineFixtures: [string, string, string, string, string][] = [
+    ["ordinary", "prefix before suffix\n", "PUT 1:\n+prefix after suffix", "before", "after"],
+    ["mixed", "head\nbefore\r\nkeep\r\ntail\n", "PUT 2:\n+after", "before", "after"],
+    ["bom", "\uFEFFbefore\r\nkeep\n", "PUT 1:\n+after", "before", "after"],
+    ["final-newline", "before\n", "CUT 2", "before\n", "before"],
+    ["unterminated", "before", "PUT 1:\n+after", "before", "after"],
+    ["literal-quotes", "“before”  \nkeep—unchanged  \n", "PUT 1:\n+\"after\"", '\"before\"', '\"after\"'],
+    ["unicode", "α😀before界\n", "PUT 1:\n+α😀after界", "before", "after"],
+    ["duplicate-payload", "A\nB\nC\nD\n", "PUT 2.=3:\n+A\n+B2\n+C2", "B\nC", "A\nB2\nC2"],
+    ["indentation", "function f() {\n  first();\n  second();\n}\n", "PUT 2.=3:\n+first();\n+second();", "  first();\n  second();", "first();\nsecond();"],
+  ];
+  for (const [name, source, body, oldText, newText] of lineFixtures) {
     const actualPath = join(directory, `${name}-actual.txt`);
     const expectedPath = join(directory, `${name}-expected.txt`);
     await writeFile(actualPath, source); await writeFile(expectedPath, source);
-    const edits = [{ oldText, newText }];
-    const actual = await hashEdit.execute("exact-edit", { path: actualPath, edits }, undefined, undefined, ctx);
-    const expected = await nativeEdit.execute("native-edit", { path: expectedPath, edits }, undefined, undefined, ctx);
+    const actual = await hashEdit.execute("anchored-edit", { input: `${await readHeader(actualPath)}\n${body}` }, undefined, undefined, ctx);
+    const expected = await nativeEdit.execute("native-comparison", { path: expectedPath, edits: [{ oldText, newText }] }, undefined, undefined, ctx);
     assert((await readFile(actualPath)).equals(await readFile(expectedPath)), name);
     assert(actual.details && expected.details && typeof actual.details === "object" && "diff" in actual.details);
     assert.equal(actual.details.diff, expected.details.diff);
-  }
-  for (const edits of [[], [{ oldText: "", newText: "new" }], [{ oldText: "missing", newText: "new" }], [{ oldText: "one", newText: "one" }], [{ oldText: "one\r\ntwo", newText: "new" }, { oldText: "two", newText: "other" }]]) {
-    await writeFile(textPath, "one\r\ntwo\n");
-    await assert.rejects(hashEdit.execute("invalid-exact", { path: textPath, edits }, undefined, undefined, ctx));
-    assert.equal(await readFile(textPath, "utf8"), "one\r\ntwo\n");
   }
   const linePath = join(directory, "lines.txt");
   await writeFile(linePath, "head\nbefore\r\nkeep\r\ntail\n");
@@ -151,7 +165,6 @@ try {
   await hashEdit.execute("atomic-valid", { input: `${firstHeader}\nPUT 1:\n+changed\n${await readHeader(secondPath)}\nPUT 1:\n+changed` }, undefined, undefined, ctx);
   assert.equal(await readFile(secondPath, "utf8"), "changed\n");
   const controller = new AbortController(); controller.abort();
-  await assert.rejects(hashEdit.execute("aborted", { path: firstPath, edits: [{ oldText: "changed", newText: "bad" }] }, controller.signal, undefined, ctx));
   await assert.rejects(hashEdit.execute("aborted-lines", { input: `${await readHeader(firstPath)}\nPUT 1:\n+bad` }, controller.signal, undefined, ctx));
   assert.equal(await readFile(firstPath, "utf8"), "changed\n");
   for (const name of ["odd]name.txt", "two\nlines.txt", "literal;name,#tag[1].txt"]) {
@@ -176,7 +189,7 @@ try {
   const notebookPath = join(directory, "notebook.ipynb");
   await writeFile(notebookPath, '{"cells":[],"metadata":{"marker":"before"},"nbformat":4,"nbformat_minor":5}\n');
   assert((await read({ path: notebookPath })).content.some(block => block.type === "text" && block.text.includes('"metadata"')));
-  await hashEdit.execute("notebook", { path: notebookPath, edits: [{ oldText: "before", newText: "after" }] }, undefined, undefined, ctx);
+  await hashEdit.execute("notebook", { input: `${await readHeader(notebookPath)}\nPUT 1:\n+{\"cells\":[],\"metadata\":{\"marker\":\"after\"},\"nbformat\":4,\"nbformat_minor\":5}` }, undefined, undefined, ctx);
   assert((await readFile(notebookPath, "utf8")).includes("after"));
 
   sdk.initTheme("dark", false);
@@ -194,10 +207,28 @@ try {
   editComponent.setArgsComplete(); editComponent.render(120);
   await new Promise<void>(accept => setTimeout(accept, 50));
   assert(editComponent.render(120).map(stripVTControlCharacters).join("\n").includes("after"), "Line editing must retain the native pre-execution diff preview.");
+  assert(editComponent.render(120).map(stripVTControlCharacters).join("\n").includes("hashline_edit · lines"));
   assert.equal(await readFile(linePath, "utf8"), "before\n");
   const edited = await hashEdit.execute("ui-edit", { input: `${uiHeader}\nPUT 1:\n+after` }, undefined, undefined, ctx);
   editComponent.updateResult({ ...edited, isError: false });
   for (const width of [24, 60, 120]) assert(editComponent.render(width).every(line => tui.visibleWidth(line) <= width));
+  const unseenPath = join(directory, "unseen-ui.txt");
+  await writeFile(unseenPath, "one\ntwo\n");
+  const partialRead = await read({ path: unseenPath, offset: 1, limit: 1 });
+  const partialHeader = partialRead.content.find(block => block.type === "text")?.text.split("\n")[0];
+  assert(partialHeader);
+  const rejectedInput = { input: `${partialHeader}\nPUT 2:\n+changed` };
+  const rejected = await invoke("hashline_edit", rejectedInput);
+  assert(rejected.isError && (await readFile(unseenPath, "utf8")) === "one\ntwo\n");
+  const errorComponent = new sdk.ToolExecutionComponent("hashline_edit", "error-ui", rejectedInput, {}, { renderCall: hashEdit.renderCall, renderResult: hashEdit.renderResult, renderShell: hashEdit.renderShell }, testTUI(new tui.Container()), directory);
+  errorComponent.setArgsComplete(); errorComponent.render(120);
+  errorComponent.updateResult({ content: rejected.content, details: rejected.details, isError: true });
+  const errorDisplay = errorComponent.render(120).map(stripVTControlCharacters).join("\n");
+  assert(errorDisplay.includes("hashline_edit · lines"), "Rejected hashline edits must keep the hashline tool name.");
+  assert(!errorDisplay.split("\n").some(line => /^\s*edit\s/u.test(line)), "The error renderer must not relabel hashline_edit as native edit.");
+  const legacyComponent = new sdk.ToolExecutionComponent("hashline_edit", "legacy-ui", { path: unseenPath, edits: [{ oldText: "one", newText: "ONE" }] }, {}, { renderCall: hashEdit.renderCall, renderResult: hashEdit.renderResult, renderShell: hashEdit.renderShell }, testTUI(new tui.Container()), directory);
+  legacyComponent.setArgsComplete();
+  assert(legacyComponent.render(120).map(stripVTControlCharacters).join("\n").includes("unsupported input"));
 
   session.setActiveToolsByName([...session.getActiveToolNames(), "read", "edit"]);
   assert((await invoke("read", { path: linePath })).isError, "Stale native read calls must be blocked.");
@@ -228,7 +259,7 @@ try {
   assert(session.getActiveToolNames().includes("hashline_edit") && !session.getActiveToolNames().includes("edit"));
   assert(!(await invoke("hashline_read", { path: linePath })).isError);
   assert.deepEqual(errors, []); assert.equal(networkAttempts, 0);
-  console.log("PASS: native read/exact-edit parity; literal byte-preserving line edits; schema checks; snapshots; atomic preflight; cancellation; paths; symlinks; images; notebook JSON; skill catalog; native resource/docs UI and diff previews; on/off/reload; native blocking; zero network requests");
+  console.log("PASS: native read/write parity; mandatory anchored line edits; rejection of exact-text and legacy forms; snapshots; atomic preflight; cancellation; paths; images; notebook JSON; skill catalog; native diff previews; stable success/error headers; on/off/reload; native blocking; zero network requests");
 } finally {
   globalThis.fetch = originalFetch;
   if (session) { await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); session.dispose(); }

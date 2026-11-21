@@ -39,16 +39,15 @@ export default function registerFixture(pi: ExtensionAPI): void {
       if (phase === "resource" && !results.length) call = plan("hashline_read", { path: "AGENTS.md" });
       if (phase === "skill" && !results.length) call = plan("hashline_read", { path: "skills/ui-fixture/SKILL.md" });
       if (phase === "docs" && !results.length) call = plan("hashline_read", { path: join(getDocsPath(), "models.md"), limit: 3 });
-      if (phase === "line") {
-        if (!results.length) call = plan("hashline_read", { path: "fixture.ts" });
+      if (phase === "line" || phase === "second" || phase === "rejected") {
+        if (!results.length) call = plan("hashline_read", phase === "rejected" ? { path: "fixture.ts", offset: 1, limit: 1 } : { path: "fixture.ts" });
         else if (results.length === 1) {
           const text = results[0]?.content.filter(block => block.type === "text").map(block => block.text).join("\n");
           const header = text?.split("\n")[0];
           if (!header) throw new Error("Missing fixture snapshot.");
-          call = plan("hashline_edit", { input: `${header}\nPUT 2:\n+console.log(after);` });
+          call = plan("hashline_edit", { input: `${header}\nPUT 2:\n+${phase === "line" ? "console.log(after);" : phase === "second" ? "console.warn(after);" : "console.error(unseen);"}` });
         }
       }
-      if (phase === "exact" && !results.length) call = plan("hashline_edit", { path: "fixture.ts", edits: [{ oldText: "console.log(after)", newText: "console.warn(after)" }] });
       if (phase === "write" && !results.length) call = plan("write", { path: "written.md", content: "WRITE_UI_MARKER\n" });
       if (phase === "native" && !results.length) call = plan("edit", { path: "fixture.ts", edits: [{ oldText: "console.warn(after)", newText: "console.info(after)" }] });
       if (phase === "fold" && !results.length) call = plan("hashline_read", { path: "fold.ts" });

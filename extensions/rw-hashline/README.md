@@ -10,10 +10,10 @@ It has no AST tools, parser bundle, worker, WASM, Rust, C, or Git LFS artifact.
 - `hashline_read` delegates reading, filename fallback, image processing, settings, truncation, and structured output to Pi.
 - Text results add a quoted file header and numbered lines. `raw: true` returns native text and continuation notices.
 - The UI retains native syntax highlighting, resource/skill/docs headers, images, and expansion.
-- `hashline_edit` accepts literal line documents or native exact-text replacements through the same tool.
+- `hashline_edit` accepts only snapshot-checked line documents. Anchoring is mandatory for every edit through this tool.
 - Line edits preserve untouched bytes, mixed newline styles, BOM, indentation, and intentional duplicate rows.
-- Exact-text edits reuse Pi's native matching, errors, newline handling, and diff metadata.
-- Edit rows retain Pi's native diff presentation and pre-execution preview.
+- Edit rows retain Pi's native diff presentation and pre-execution preview, with an explicit `hashline_edit · lines` header.
+- Rejected edit rows keep the hashline tool name instead of being relabeled as native `edit`.
 - Ordinary `write` remains the built-in tool. It keeps its complete behavior and UI.
 - While enabled, rw-hashline removes native `read`/`edit` from active selection and blocks stale or nested calls.
 
@@ -45,18 +45,17 @@ Pi's native read exposes a final empty row; cutting that row removes the final n
 There is no `N*` block selection, clipboard, move, rename, file deletion, or automatic payload repair.
 Use ordinary filesystem tools for file operations. Use `write` for new files and justified complete rewrites.
 
-### Exact-text form
+### Mandatory editing contract
 
-```json
-{
-  "path": "notes.md",
-  "edits": [{ "oldText": "before", "newText": "after" }]
-}
-```
+The only edit input is `{ "input": "..." }`, containing current file headers and PUT/CUT operations.
+Native `path`/`edits[]`, top-level `oldText`/`newText`, and legacy exact-text shapes are rejected before writing.
+There is no argument conversion or automatic fallback to another editing form.
 
-This form preserves native edit capabilities for substrings, very long lines, and notebook JSON.
-It retains Pi's argument preparation for existing exact-text call shapes.
-It is not a bypass for rejected line edits; re-read and correct stale or unsafe requests.
+For a substring change, replace the complete affected lines after inspecting them with `hashline_read`.
+Notebook JSON uses the same line-editing contract; it has no separate replacement interface.
+If a complete required line exceeds the read limit, anchored editing remains unavailable for that line.
+The plugin rejects edits to undisplayed content; it must not bypass this restriction through `write` or scripts.
+Native read/write behavior remains available. Full parity with native exact-text editing is intentionally not claimed.
 
 ## Controls and Powerline
 

@@ -72,12 +72,15 @@ try {
     const record = (await records()).findLast(item => item.event === "checkpoint" && item.phase === name);
     assert(record); return record;
   };
-  const prompt = async (name: string) => {
-    const count = (await records()).filter(record => record.event === "settled").length;
+  const prompt = async (name: string, expectedRejection = false) => {
+    const previous = await records();
+    const count = previous.filter(record => record.event === "settled").length;
     child.write(`fixture:${name}\r`);
     await wait(name, async () => (await records()).filter(record => record.event === "settled").length > count);
     await wait(`${name} render`, () => visible().includes(`FIXTURE_DONE_${name}`));
-    assert(!(await records()).some(record => record.event === "tool" && record.error));
+    const failures = (await records()).slice(previous.length).filter(record => record.event === "tool" && record.error);
+    if (expectedRejection) assert(failures.length === 1 && failures[0]?.name === "hashline_edit");
+    else assert.equal(failures.length, 0, "Unexpected tool failures must not be hidden.");
   };
   await wait("default-on Powerline", () => visible().includes("rw-hashline: on"));
   const on = await checkpoint("on");
@@ -89,7 +92,12 @@ try {
   await prompt("skill"); assert(visible().includes("[skill] ui-fixture"));
   await prompt("docs"); assert(visible().includes("hashline_read docs docs/models.md"));
   await prompt("line"); assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nconsole.log(after);\n");
-  await prompt("exact"); assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nconsole.warn(after);\n");
+  assert(visible().includes("hashline_edit · lines"), "The UI must identify snapshot-checked line editing.");
+  await prompt("second"); assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nconsole.warn(after);\n");
+  output = ""; await prompt("rejected", true);
+  assert(visible().includes("hashline_edit · lines"), "Rejected edits must keep their hashline header.");
+  assert(!visible().split("\n").some(line => /^\s*edit\s/u.test(line)), "Native result rendering must not relabel a hashline call.");
+  assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nconsole.warn(after);\n");
   await prompt("write"); assert.equal(await readFile(join(workspace, "written.md"), "utf8"), "WRITE_UI_MARKER\n");
   output = ""; await prompt("fold"); assert(!visible().includes("FOLD_UI_TAIL"));
   child.write("\x0f"); assert.equal((await checkpoint("expanded")).expanded, true);
@@ -107,7 +115,7 @@ try {
   const restored = await checkpoint("restored"); assert(restored.tools?.includes("hashline_edit") && !restored.tools.includes("edit"));
   await wait("restored Powerline", () => visible().includes("rw-hashline: on"));
   child.write("/quit\r"); await wait("shutdown", () => exitCode !== undefined); assert.equal(exitCode, 0);
-  console.log("PASS: actual Pi terminal; native read/write/edit presentation; literal and exact edits; resource/skill/docs headers; keyboard expansion; Powerline on/off; reload; native restoration; resize; no AST tools; graceful shutdown");
+  console.log("PASS: actual Pi terminal; native read/write presentation; mandatory anchored edits and explicit line-mode headers; resource/skill/docs headers; keyboard expansion; Powerline on/off; reload; native restoration; resize; no AST tools; graceful shutdown");
 } catch (error) {
   console.error(JSON.stringify({ phase, failure: error instanceof assert.AssertionError ? error.message : "Terminal check failed; raw diagnostics withheld." }));
   throw error;
