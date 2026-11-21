@@ -1,12 +1,12 @@
 import {
-  createReadToolDefinition, createWriteToolDefinition,
+  createReadToolDefinition, createWriteToolDefinition, formatSkillsForPrompt,
   detectSupportedImageMimeTypeFromFile, truncateHead, withFileMutationQueue,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { homedir } from "node:os";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { registerControls, type ControlsContext } from "./controls.ts";
 import { addonPath, NativeClient } from "./core-client.ts";
@@ -14,6 +14,7 @@ import type { NativeEdit, NativePlan, NativeRead, NativeSearch } from "./core-ty
 import { fileTracking, restoreCodeAnchorFiles, type FileTrackingDetails } from "./file-tracking.ts";
 import type { GrammarManifest } from "./scripts/grammar-types.ts";
 import { astEditRenderers, astSearchRenderers, hashlineRenderers, renderCompactResult } from "./render.ts";
+import { formatHashlineRead, resolveReadTarget, type HashlineReadDetails } from "./read.ts";
 
 function filePath(value: string, cwd: string): string {
   const mentioned = value.startsWith("@") ? value.slice(1) : value;
@@ -76,6 +77,15 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
     }
   };
   pi.on("before_agent_start", hideNativeTools);
+  pi.on("before_agent_start", event => {
+    const options = event.systemPromptOptions;
+    if (!enabled || !options.selectedTools.includes("hashline_read") || options.sections.skills) return;
+    const catalog = formatSkillsForPrompt(options.skills, "indirect");
+    if (catalog) {
+      options.sections.skills = options.hiddenTools.includes("hashline_read") ? catalog
+        : catalog.replace("Load a skill's file when the task matches its description.", "Use hashline_read to load a skill's file when the task matches its description.");
+    }
+  });
   pi.on("tool_execution_end", hideNativeTools);
 
   const textResult = (text: string, details?: FileTrackingDetails) => {
@@ -96,9 +106,9 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
       offset: Type.Optional(Type.Integer({ minimum: 1, description: "First source line, starting at 1. Omitted means 1. Use when the path has no range selector." })),
       limit: Type.Optional(Type.Integer({ minimum: 1, description: "Maximum lines to read when no range selector is present. Omitted means 300, or 2000 with :raw. Output limits still apply." })),
     }, { additionalProperties: false });
-    pi.registerTool<typeof readParameters, FileTrackingDetails>({
+    pi.registerTool<typeof readParameters, HashlineReadDetails, { readPath?: string }>({
       name: "hashline_read", label: "Hashline Read · CodeAnchor",
-      description: "Read files with snapshot-tagged line anchors. If the file and relevant lines are known, open that range directly. Text reading does not require AST grammar support. Bare code reads can summarize supported syntax; unsupported syntax remains ordinary text. Inspect relevant implementations before editing. For hashline_edit, obtain current snapshot tags and line anchors from hashline_read. Put optional line selectors in path: :N-M, :N+K, :N-, :-N, or comma ranges. :raw returns exact text without anchors; combine it with a range. Non-raw single ranges include surrounding context and supported syntax boundaries. Images use Pi's standard reader. Output is limited to 2000 lines or 50KB.",
+      description: "Read files with snapshot-tagged line anchors. If the file and relevant lines are known, open that range directly. Text reading does not require AST grammar support. Bare code reads can summarize supported syntax; unsupported syntax remains ordinary text. Inspect relevant implementations before editing. For hashline_edit, obtain current snapshot tags and line anchors from hashline_read. Put optional line selectors in path: :N-M, :N+K, :N-, :-N, or comma ranges. Complete :raw reads return exact text without anchors; truncated reads include a continuation notice. Non-raw single ranges include surrounding context and supported syntax boundaries. Images and their settings use Pi's standard reader. Resource, skill, and internal-documentation files use native display classifications. Output is limited to 2000 lines or 50KB.",
       promptSnippet: "Inspect known file ranges directly and obtain snapshot-tagged anchors for hashline edits",
       promptGuidelines: [
         "Use hashline_read to inspect implementations, control flow, arguments, and data transformations after structural or text searches.",
@@ -108,29 +118,36 @@ export default async function registerCodeAnchor(pi: ExtensionAPI): Promise<void
         "If hashline_read summarizes needed source, open the omitted ranges. Never infer hidden source or invent anchors.",
         "For multiple files, make separate hashline_read calls. Group independent calls only when the execution interface supports it; never join filenames in path.",
       ],
-      renderCall(args, theme) {
-        const range = args.offset === undefined ? "" : `:${args.offset}${args.limit === undefined ? "-" : `+${args.limit}`}`;
-        return new Text(`${theme.fg("toolTitle", theme.bold("hashline_read"))} ${theme.fg("accent", args.path)}${range}`, 0, 0);
+      renderCall(args, theme, context) {
+        // Keep Pi's resource/doc/skill classification and path links without exposing native read.
+        const namedTheme = new Proxy(theme, {
+          get(target, key) {
+            if (key === "bold") return (text: string) => target.bold(text.replace(/^read(?=\s|$)/u, "hashline_read"));
+            return Reflect.get(target, key);
+          },
+        });
+        return builtinRead.renderCall?.({ ...args, path: context.state.readPath ?? args.path }, namedTheme, context) ?? new Text("hashline_read", 0, 0);
       },
       renderResult(result, options, theme, context) {
+        context.state.readPath = result.details?.readFiles[0];
+        if (!options.expanded && result.details?.readNotice) return new Text(theme.fg("warning", result.details.readNotice), 0, 0);
         return builtinRead.renderResult?.({ ...result, details: undefined }, options, theme, context) ?? new Text("", 0, 0);
       },
       parameters: readParameters,
+      outputSchema: builtinRead.outputSchema,
+      constrainedSampling: builtinRead.constrainedSampling,
       executionMode: "sequential",
-      async execute(id, params, signal, onUpdate, ctx) {
+      async execute(id, params, signal, _onUpdate, ctx) {
         if (!enabled) throw new Error("CodeAnchor is off");
-        const path = filePath(params.path, ctx.cwd);
-        const metadata = await stat(path).catch((error: unknown) => {
-          if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
-          throw error;
-        });
-        if (metadata && !metadata.isFile()) throw new Error("The read target must be a regular file");
-        if (metadata && await detectSupportedImageMimeTypeFromFile(path)) {
-          const result = await createReadToolDefinition(ctx.cwd).execute(id, params, signal, undefined, ctx);
-          return { ...result, details: fileTracking([path], []) };
+        const target = await resolveReadTarget(client, filePath(params.path, ctx.cwd), params.path, ctx.cwd, signal);
+        if (target.metadata && await detectSupportedImageMimeTypeFromFile(target.path)) {
+          const autoResizeImages = pi.getSettings().images?.autoResize ?? true;
+          const result = await createReadToolDefinition(ctx.cwd, { autoResizeImages }).execute(id, { ...params, path: target.path }, signal, undefined, ctx);
+          return { ...result, details: { ...result.details, ...fileTracking([await realpath(target.path)], [], [params.path]) } };
         }
-        const result = JSON.parse(await client.request({ action: "read", path, display: params.path, offset: params.offset, limit: params.limit }, signal)) as NativeRead;
-        return { content: [{ type: "text", text: result.text }], details: fileTracking([filePath(result.path, ctx.cwd)], [], [params.path]) };
+        const path = target.selector === null ? target.path : `${target.path}:${target.selector}`;
+        const result = JSON.parse(await client.request({ action: "read", path, display: target.display, offset: params.offset, limit: params.limit }, signal)) as NativeRead;
+        return formatHashlineRead(result, await realpath(target.path), params.path, target.raw);
       },
     });
     pi.registerTool({

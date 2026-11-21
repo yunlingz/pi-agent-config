@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getDocsPath, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 
 export interface TuiTrace {
@@ -75,6 +75,15 @@ export default function registerTuiFixture(pi: ExtensionAPI): void {
           break;
         case "raw":
           if (results.length === 0) plan("hashline_read", { path: "fixture.ts:raw" });
+          break;
+        case "resource":
+          if (results.length === 0) plan("hashline_read", { path: "AGENTS.md" });
+          break;
+        case "skill":
+          if (results.length === 0) plan("hashline_read", { path: "skills/ui-fixture/SKILL.md" });
+          break;
+        case "docs":
+          if (results.length === 0) plan("hashline_read", { path: join(getDocsPath(), "models.md"), offset: 1, limit: 4 });
           break;
         default: throw new Error("Unknown terminal fixture prompt");
       }

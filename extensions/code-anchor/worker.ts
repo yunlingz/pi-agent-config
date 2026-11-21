@@ -21,6 +21,7 @@ async function run(message: WorkerRequest): Promise<string> {
   beforeWrite();
   switch (request.action) {
     case "reset": engine.session({ action: "reset" }); preview = undefined; return "";
+    case "read_target": return JSON.stringify(engine.session({ action: "read_target", path: request.path }));
     case "read": {
       let file = await supplyFile(request.path, process.cwd());
       let selector: string | null = null;

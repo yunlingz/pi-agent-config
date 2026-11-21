@@ -94,7 +94,14 @@ File discovery prefers Pi's `find` and `ls`; `rg --files` is the fallback when t
 Tool descriptions and active prompt guidelines carry the full selection, inspection, editing, and recovery rules.
 These search recommendations do not assume shell access or install search programs automatically.
 When off, CodeAnchor disables its four tools and restores native `write` metadata without activating native `read` or `edit`.
-Native read and write renderers still handle their corresponding results, including collapsed and expanded views.
+Hashline reading retains Pi's resource, skill, and internal-documentation headers, plus native image processing and settings.
+Structured results supply the same text or image data to programmatic callers. Complete raw reads keep exact text.
+Truncated raw reads carry a continuation notice; a selected line that cannot fit the limit produces an explicit error.
+Native filename fallbacks run before hashline selection. Resolved names produce file headers that remain safe to edit.
+Pi 1.5.1 does not recognize renamed readers for skill discovery in prompts. CodeAnchor supplies its skill catalog before model requests.
+The catalog follows the active hashline reader; disabling CodeAnchor does not activate native readers.
+Strict UTF-8 and regular-file checks remain intentional differences from native text reading.
+The filename resolver reuses installed Pi code from `dist/core/tools/path-utils.js`; this internal path needs compatibility checks after Pi updates.
 Hashline edits, AST results, and AST resolution use ten-row previews with Pi's expansion shortcut.
 Preview limits count wrapped terminal rows; expanded views retain the complete tool result.
 Hashline edit headers show target paths instead of the native edit tool's incompatible argument placeholder.
@@ -205,6 +212,8 @@ The integration check rejects invalid argument shapes and checks literal punctua
 The live session verifier checks active guidance after real manual compaction and reload.
 The integration verifier also renders actual tool results through Pi's renderer resolution and tool component.
 It checks folding, expansion, resizing, wide characters, target headers, and unchanged model-facing results at 24, 60, and 120 columns.
+`verify-read-parity.ts` compares actual native and hashline readers, resource headers, filename fallback, structured results, image settings, and raw warnings.
+`verify-read-live.ts` checks the real model's skill catalog, skill/resource/Pi documentation reads, exact answers, and an image attachment.
 
 `verify-tui.ts` starts the actual Pi CLI through an existing `node-pty` installation and loads the installed Powerline extension.
 The test uses automatic CodeAnchor discovery, isolated settings, synthetic source, a local fixture provider, and no credentials or network requests.

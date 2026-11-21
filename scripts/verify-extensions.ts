@@ -20,7 +20,7 @@ const checks = mode === "offline" ? [
     "scripts/verification-data.test.ts",
     "scripts/live-verification.test.ts", "skills/sync-pi-config/scripts/verify.test.ts"] },
   ...["compact-quit/verify-integration.ts", "token-usage/verify-integration.ts", "web-search/verify-integration.ts",
-    "code-anchor/verify-integration.ts", "code-anchor/verify-tool-policy.ts", "node-scripts/verify-integration.ts"]
+    "code-anchor/verify-integration.ts", "code-anchor/verify-read-parity.ts", "code-anchor/verify-tool-policy.ts", "node-scripts/verify-integration.ts"]
     .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory] })),
 ] : ["compact-quit/verify-live.ts", "web-search/verify-live.ts"]
   .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory, ...(modelOverride ? [modelOverride] : [])] }));

@@ -8,6 +8,8 @@ export interface NativeRead {
   truncated: boolean;
 }
 
+export interface NativeReadTarget { path: string; selector: string | null }
+
 export interface NativeEdit {
   text: string;
   isError?: boolean;
@@ -55,6 +57,7 @@ export interface NativePlan {
 }
 
 export type NativeRequest =
+  | { action: "read_target"; path: string }
   | { action: "read"; path: string; display: string; offset?: number; limit?: number }
   | { action: "inspect" | "apply"; input: string; cwd: string; home: string; lockedPaths?: string[] }
   | { action: "search"; paths: string[]; cwd: string; pattern: string; language?: string; skip: number }

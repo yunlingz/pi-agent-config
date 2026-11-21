@@ -38,6 +38,9 @@ async function main(): Promise<void> {
     await symlink(root, join(agent, "extensions", "code-anchor"), process.platform === "win32" ? "junction" : "dir");
     await mkdir(workspace);
     await writeFile(join(workspace, "fixture.ts"), "// terminal fixture\nconsole.log(before);\n");
+    await writeFile(join(workspace, "AGENTS.md"), "# Terminal parity fixture\nRESOURCE_UI_MARKER\n");
+    await mkdir(join(workspace, "skills/ui-fixture"), { recursive: true });
+    await writeFile(join(workspace, "skills/ui-fixture/SKILL.md"), "# UI skill fixture\nSKILL_UI_MARKER\n");
     const foldedSource = Array.from({ length: 40 }, (_, index) => `console.log("${index === 39 ? "FOLD_UI_TAIL" : `row_${index}`} ${"界".repeat(20)}");`).join("\n") + "\n";
     await writeFile(join(workspace, "fold.ts"), foldedSource);
     await writeFile(join(agent, "settings.json"), JSON.stringify({
@@ -107,6 +110,12 @@ async function main(): Promise<void> {
     assert.equal(start?.mode, "tui");
     await wait("rendering the default-on Powerline status", () => /code-anchor:\s*on/u.test(visible()));
     assert((await checkpoint("on")).tools?.includes("ast_grep"));
+    await prompt("resource");
+    assert(visible().includes("hashline_read resource AGENTS.md"), "Keep the native resource header");
+    await prompt("skill");
+    assert(visible().includes("[skill] ui-fixture"), "Keep the native skill header");
+    await prompt("docs");
+    assert(visible().includes("hashline_read docs docs/models.md"), "Keep the native internal-doc header");
     await prompt("hashline");
     assert.equal(await readFile(join(workspace, "fixture.ts"), "utf8"), "// terminal fixture\nconsole.log(after);\n");
     assert(visible().includes("fixture.ts"));

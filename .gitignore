@@ -66,6 +66,7 @@
 !/extensions/code-anchor/extension.ts
 !/extensions/code-anchor/index.ts
 !/extensions/code-anchor/render.ts
+!/extensions/code-anchor/read.ts
 !/extensions/code-anchor/core-types.ts
 !/extensions/code-anchor/wasm-runtime.ts
 !/extensions/code-anchor/wasm.test.ts
@@ -75,6 +76,9 @@
 !/extensions/code-anchor/worker.ts
 !/extensions/code-anchor/verify-integration.ts
 !/extensions/code-anchor/verify-tool-policy.ts
+!/extensions/code-anchor/verify-read-parity.ts
+!/extensions/code-anchor/verify-read-live.ts
+!/extensions/code-anchor/read-live-observer.ts
 !/extensions/code-anchor/verify-live.ts
 !/extensions/code-anchor/verify-live-session.ts
 !/extensions/code-anchor/verify-performance.ts
