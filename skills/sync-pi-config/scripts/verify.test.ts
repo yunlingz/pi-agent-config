@@ -65,7 +65,7 @@ test('healthy session requires real read evidence and the configured model', () 
   assert.equal(assertHealthy(createHealthyFixture().events, settings, marker), 'test/model');
 });
 
-test('native read results must not substitute for CodeAnchor reading', () => {
+test('native read results must not substitute for rw-hashline reading', () => {
   const fixture = createHealthyFixture();
   fixture.read.toolName = 'read';
   assert.throws(() => assertHealthy(fixture.events, settings, marker));

@@ -1,0 +1,9 @@
+{
+  "package": "@oh-my-pi/hashline",
+  "version": "18.1.5",
+  "integrity": "sha512-OQlhV9kf7KF7ujoW8HWpzU9M0LWysZfkGYQFisIfY1RDKWV2D4LEnyKc2ovZqZI02CV69pcx3mFLjTx7mGZlDg==",
+  "url": "https://www.npmjs.com/package/@oh-my-pi/hashline",
+  "repository": "https://github.com/can1357/oh-my-pi/tree/main/packages/hashline",
+  "files": ["src/format.ts", "src/grammar.lark", "src/prompt.md"],
+  "role": "Code reference only. No runtime dependency, automatic update, or full-protocol compatibility claim."
+}

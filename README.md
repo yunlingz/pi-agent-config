@@ -72,7 +72,9 @@ The agent queries status when needed. There are no proactive callbacks, source s
 Script files remain reusable and editable. Jobs retain their launch SHA-256; queries report whether the current entry changed or disappeared.
 Managed files stay within the session workspace. The compact panel uses aligned columns and todo-style rows; expansion shows execution evidence.
 The four default built-in tools are `write`, `grep`, `find`, and `ls`; extension tools remain available.
-CodeAnchor provides `hashline_read` and `hashline_edit` separately and blocks native `read` and `edit` while on.
+The TypeScript [rw-hashline plugin](extensions/rw-hashline/README.md) provides `hashline_read` and `hashline_edit` and blocks native `read`/`edit` while on.
+It keeps native read/write presentation and supports literal line edits plus native exact-text edits without AST tools or native dependencies.
+`/rw-hashline off` restores available native readers and editors; new sessions default to on.
 Direct Bash and PowerShell tool calls are blocked while node-scripts is on. Node launchers can reuse existing project interpreters and scripts unchanged.
 Older resumed sessions may need a [one-time tool-selection correction](extensions/node-scripts/README.md#native-tools-and-resumed-sessions).
 `/node-scripts on|off|status|expand|collapse` controls the branch preference and panel.

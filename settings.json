@@ -61,8 +61,8 @@
         "color": "muted"
       },
       {
-        "id": "code_anchor",
-        "statusKey": "code-anchor",
+        "id": "rw_hashline",
+        "statusKey": "rw-hashline",
         "position": "left",
         "color": "muted"
       },
@@ -84,7 +84,7 @@
         "model",
         "thinking",
         "custom:web_search",
-        "custom:code_anchor",
+        "custom:rw_hashline",
         "custom:node_scripts",
         "shell_mode",
         "path",

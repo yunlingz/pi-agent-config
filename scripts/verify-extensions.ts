@@ -14,13 +14,12 @@ const agentDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checks = mode === "offline" ? [
   { name: "unit tests", args: ["--test",
     "extensions/token-usage/token-usage.test.ts",
-    "extensions/web-search/web-search.test.ts", "extensions/code-anchor/controls.test.ts",
-    "extensions/code-anchor/file-tracking.test.ts", "extensions/node-scripts/node-scripts.test.ts",
-    "extensions/code-anchor/wasm.test.ts", "extensions/code-anchor/reference-fixtures.test.ts",
+    "extensions/web-search/web-search.test.ts", "extensions/rw-hashline/hashline.test.ts",
+    "extensions/node-scripts/node-scripts.test.ts",
     "scripts/verification-data.test.ts",
     "scripts/live-verification.test.ts", "skills/sync-pi-config/scripts/verify.test.ts"] },
   ...["compact-quit/verify-integration.ts", "token-usage/verify-integration.ts", "web-search/verify-integration.ts",
-    "code-anchor/verify-integration.ts", "code-anchor/verify-read-parity.ts", "code-anchor/verify-tool-policy.ts", "node-scripts/verify-integration.ts"]
+    "rw-hashline/verify-integration.ts", "node-scripts/verify-integration.ts"]
     .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory] })),
 ] : ["compact-quit/verify-live.ts", "web-search/verify-live.ts"]
   .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory, ...(modelOverride ? [modelOverride] : [])] }));

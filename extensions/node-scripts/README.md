@@ -354,7 +354,7 @@ This configuration selects four built-in tools by default; extension tools remai
 
 node-scripts preserves the active native file tools. It does not activate missing tools or overwrite another extension's selection.
 Project settings and CLI options can override these defaults.
-CodeAnchor separately provides `hashline_read` and `hashline_edit` and blocks native `read` and `edit` while on.
+rw-hashline separately provides `hashline_read` and `hashline_edit` and blocks native `read` and `edit` while on.
 
 Pi 1.5.1 restores a resumed session's recorded tool selection. Changing defaults alone does not repair that selection.
 `/reload` adds newly configured defaults, but does not remove previously active tools or re-enable unchanged defaults.
