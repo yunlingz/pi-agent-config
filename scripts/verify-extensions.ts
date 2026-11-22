@@ -14,13 +14,12 @@ const agentDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const checks = mode === "offline" ? [
   { name: "unit tests", args: ["--test",
     "extensions/token-usage/token-usage.test.ts",
-    "extensions/web-search/web-search.test.ts", "extensions/rw-hashline/hashline.test.ts",
-    "extensions/node-scripts/node-scripts.test.ts",
+    "extensions/web-search/web-search.test.ts",
     "scripts/verification-data.test.ts",
     "scripts/live-verification.test.ts", "skills/sync-pi-config/scripts/verify.test.ts"] },
-  ...["compact-quit/verify-integration.ts", "token-usage/verify-integration.ts", "web-search/verify-integration.ts",
-    "rw-hashline/verify-integration.ts", "node-scripts/verify-integration.ts"]
+  ...["compact-quit/verify-integration.ts", "token-usage/verify-integration.ts", "web-search/verify-integration.ts"]
     .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory] })),
+  { name: "native tools", args: ["scripts/verify-native-tools.ts", packageDirectory] },
 ] : ["compact-quit/verify-live.ts", "web-search/verify-live.ts"]
   .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory, ...(modelOverride ? [modelOverride] : [])] }));
 let child: ChildProcess | undefined;

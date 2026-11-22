@@ -4,6 +4,9 @@
   "defaultModel": "gpt-6.1-sol",
   "transport": "sse",
   "defaultTools": [
+    "read",
+    "bash",
+    "edit",
     "write",
     "grep",
     "find",
@@ -34,9 +37,6 @@
     }
   },
   "lastChangelogVersion": "1.5.1",
-  "extensions": [
-    "-builtin:mcp"
-  ],
   "packages": [
     "npm:@juicesharp/rpiv-todo@2.15.0",
     "npm:@juicesharp/rpiv-ask-user-question@2.15.0",
@@ -61,18 +61,6 @@
         "color": "muted"
       },
       {
-        "id": "rw_hashline",
-        "statusKey": "rw-hashline",
-        "position": "left",
-        "color": "muted"
-      },
-      {
-        "id": "node_scripts",
-        "statusKey": "node-scripts",
-        "position": "left",
-        "color": "muted"
-      },
-      {
         "id": "token_usage",
         "statusKey": "token-usage",
         "position": "left",
@@ -84,8 +72,6 @@
         "model",
         "thinking",
         "custom:web_search",
-        "custom:rw_hashline",
-        "custom:node_scripts",
         "shell_mode",
         "path",
         "git",

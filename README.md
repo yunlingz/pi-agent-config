@@ -4,7 +4,7 @@ This directory is both Pi's default user configuration directory and a local Git
 
 ## Run
 
-Run `pi --no-mcp` from a project folder. Use `pi --no-mcp --continue` to resume its latest session.
+Run `pi` from a project folder. Use `pi --continue` to resume its latest session.
 `/model` selects a model, `/thinking` changes reasoning effort, and `/compact` starts manual compaction.
 
 The maintained configuration targets Pi 1.5.1 and Node.js 22.19 or newer compatible runtimes.
@@ -13,12 +13,6 @@ It identifies the active executable's installation before choosing a package man
 It preserves that manager and its package and binary locations; no fixed drive or shell is required.
 The upgrade skills use the approved company registry and disable lifecycle scripts.
 They do not use `pi update` or modify installed code directly.
-
-## MCP-free tooling
-
-`settings.json` disables built-in MCP by default with `"extensions": ["-builtin:mcp"]`. The policy is **no MCP protocol anywhere**, including shell bridges, HTTP calls to MCP endpoints, and delegation to another agent. For a per-run opt-out that project settings cannot re-enable, start Pi with `pi --no-mcp`. This flag only disables the built-in integration, not arbitrary third-party MCP adapters; the global instructions prohibit MCP clients/adapters as well. No launcher or shell alias is installed.
-
-When a task references project MCP tools, use `/skill:mcp-free-tools` for generic capability discovery from relevant metadata, schemas, documentation, or source, followed by inference and verification of an approved CLI, script, SDK, or direct API. The global skill contains no server-specific adapter logic, does not launch MCP or import credentials, and reports a capability gap when no non-MCP route can be established. Other agents' MCP configuration remains untouched. Keep project-specific mappings in project docs/scripts/skills and global guidance genuinely cross-project.
 
 ## English STE communication
 
@@ -63,25 +57,11 @@ The supplied Responses provider allows Astra, Sol, and Terra through `existing_g
 Each search uses an independent request with the main session's model, required native search, and low reasoning.
 It sends selected context, not the full conversation, and retains 64k gateway-counted input and 32k generation limits.
 `/web-search on|off|status` controls the session preference. Powerline shows `web: on`, `web: off`, `web: unavailable`, or `web: invalid setting`.
-Configuration edits take effect on `/reload`. The extension uses TypeScript without a build step or MCP.
+Configuration edits take effect on `/reload`. The extension uses TypeScript without a build step.
 
-The local [node-scripts extension](extensions/node-scripts/README.md) provides one ESM workspace per Pi session and nine small tools.
-It runs single-use `.mjs` jobs with Pi's Node binary and inherited environment, plus npm dependency operations, `rm`, and `mkdir`.
-Timed jobs wait for a result; indefinite background jobs return after startup and survive compaction/reload. Interrupted timed jobs are deprecated.
-The agent queries status when needed. There are no proactive callbacks, source snapshots, or automatic log cleanup.
-Script files remain reusable and editable. Jobs retain their launch SHA-256; queries report whether the current entry changed or disappeared.
-Managed files stay within the session workspace. The compact panel uses aligned columns and todo-style rows; expansion shows execution evidence.
-The four default built-in tools are `write`, `grep`, `find`, and `ls`; extension tools remain available.
-The TypeScript [rw-hashline plugin](extensions/rw-hashline/README.md) provides `hashline_read` and `hashline_edit` and blocks native `read`/`edit` while on.
-It keeps native read/write presentation and requires snapshot-checked line edits without AST tools or plugin-specific native dependencies.
-`/rw-hashline off` restores available native readers and editors; new sessions default to on.
-Direct Bash and PowerShell tool calls are blocked while node-scripts is on. Node launchers can reuse existing project interpreters and scripts unchanged.
-Older resumed sessions may need a [one-time tool-selection correction](extensions/node-scripts/README.md#native-tools-and-resumed-sessions).
-`/node-scripts on|off|status|expand|collapse` controls the branch preference and panel.
-Powerline displays exactly `node-scripts: on`, `node-scripts: off`, or `node-scripts: error`.
-[`pi-node-scripts.json`](pi-node-scripts.json) and its [schema](pi-node-scripts.schema.json) configure the workspace root and npm registry.
+The default native tools are `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`; extension tools remain available.
 
-Autoformat is not installed. After installing or updating packages, restart with `pi --no-mcp` so lazy UI modules load in a fresh process.
+Autoformat is not installed. After installing or updating packages, restart with `pi` so lazy UI modules load in a fresh process.
 
 ## Upgrade Pi and extensions
 
@@ -145,17 +125,12 @@ Run commands from this agent directory, using the active installed Pi package pa
 node scripts/verify-extensions.ts <installed-pi-package-directory> offline
 node themes/verify.ts <installed-pi-package-directory>
 node skills/sync-pi-config/scripts/verify.ts <installed-pi-package-directory>
+node scripts/verify-native-tools.ts <installed-pi-package-directory>
 ```
 
-The node-scripts feature has separate real-provider and terminal checks:
-
-```text
-node extensions/node-scripts/verify-live.ts <installed-pi-package-directory>
-node extensions/node-scripts/verify-tui.ts <installed-pi-package-directory> <existing-node-pty-directory> <powerline-directory>
-```
 
 Offline plugin tests use controlled responses and synthetic models. They need no service credentials or external model requests.
-They cover native compact-quit ordering, sequential summary requests, failures, cancellation, no-ops, usage, search controls, and rendering.
+They cover native file and shell tools, compact-quit ordering, sequential summaries, failures, cancellation, usage, search controls, and rendering.
 The configuration verifier makes a real read-only request with the configured default model and global resources.
 
 Feature-specific live checks are optional and can incur model charges:
@@ -169,24 +144,23 @@ They do not substitute another model when a capability is unavailable.
 The compaction test covers compact-quit, native checkpoint persistence, token reset, session reopening, and continuation.
 The web-search test requires the configured search provider's API, allowlist, hosted search, and input-count capabilities.
 These checks use synthetic history; they do not test every terminal or browser workflow.
-MCP remains disabled and temporary state is removed after each check.
+Live checks disable built-in MCP only in their temporary sessions. Temporary state is removed afterward.
 
 ## Instructions and version control
 
 `AGENTS.md` retains portable preferences from the Codex global instructions.
 These cover bounded network requests, efficient changes, focused context, code inspection before edits, verification, and scoped reusable guidance.
-Managed execution tools own temporary-script routing, process progress, retention, and cleanup contracts.
-The former global progress and temporary-helper sections were removed after replacement verification.
+Available tool metadata defines execution and file-editing contracts.
 Maintained local code retains the centralized TypeScript rules; disposable helpers use JavaScript.
 
 No Codex skills, extensions, MCP servers, sessions, or other Codex settings were migrated.
 
 ## Sync configuration
 
-Run `/reload` after adding or editing skills or instructions. Invoke `/skill:sync-pi-config` to run its regression tests, check the currently installed Pi's JSON schemas and skill discovery, and start a real read-only agent session in a disposable OS temporary directory with `--no-mcp`. It checks the required global MCP-disable setting before starting the session, and reviews, stages, and commits intended changes only after verification succeeds. It makes real model requests using the existing credentials and configured default model; it does not update Pi, install packages, or push.
+Run `/reload` after changing skills or instructions. Invoke `/skill:sync-pi-config` to verify installed JSON schemas, skill discovery, and a real native-read session. Its temporary session disables built-in MCP without requiring a global MCP setting. It saves only reviewed, verified changes and does not update Pi, install packages, or push.
 
 `.gitignore` tracks only reviewed configuration, documentation, local extensions, themes, and explicitly listed global skill files.
-The tracked global skills are `sync-pi-config`, `mcp-free-tools`, `upgrade-pi-extensions`, and `upgrade-pi-agent`.
+The tracked global skills are `maintain-agent-guidance`, `sync-pi-config`, `upgrade-pi-extensions`, and `upgrade-pi-agent`.
 The retained STE license is also tracked.
 Credentials, sessions, caches, and other runtime files remain local.
 Add a narrow ignore exception before tracking another configuration file.

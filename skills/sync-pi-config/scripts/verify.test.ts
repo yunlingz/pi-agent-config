@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { AssistantMessage, TextContent } from '@earendil-works/pi-ai';
 import type { JsonAgentSessionEvent, SessionHeader } from '@earendil-works/pi-coding-agent';
 import { parseTrustedJson } from '../../../scripts/verification-data.ts';
-import { assertHealthy, assertMcpDisabled, type VerificationEvent, type VerificationSettings } from './verify.ts';
+import { assertHealthy, type VerificationEvent, type VerificationSettings } from './verify.ts';
 
 const settings = {
   defaultProvider: 'test',
@@ -18,7 +18,7 @@ function createHealthyFixture() {
   };
   const fileText: TextContent = { type: 'text', text: marker };
   const read: Extract<VerificationEvent, { type: 'tool_execution_end' }> = {
-    type: 'tool_execution_end', toolCallId: 'read-marker', toolName: 'hashline_read', isError: false,
+    type: 'tool_execution_end', toolCallId: 'read-marker', toolName: 'read', isError: false,
     result: { content: [fileText], details: undefined },
   };
   const reply: TextContent = { type: 'text', text: marker };
@@ -46,28 +46,13 @@ test('trusted CLI JSON reuses SDK records without reconstructing their fields', 
   assert.deepEqual(finalMessage.message, fixture.assistant);
 });
 
-test('MCP must be explicitly disabled without conflicting enable entries', () => {
-  assert.doesNotThrow(() => assertMcpDisabled({ extensions: ['-builtin:mcp'] }));
-  assert.doesNotThrow(() => assertMcpDisabled({ extensions: ['-builtin:mcp', 'custom-extension.ts'] }));
-  for (const config of [
-    {},
-    { extensions: [] },
-    { extensions: ['builtin:mcp'] },
-    { extensions: ['+builtin:mcp'] },
-    { extensions: ['-builtin:mcp', '+builtin:mcp'] },
-    { extensions: ['builtin:mcp', '-builtin:mcp'] },
-  ]) {
-    assert.throws(() => assertMcpDisabled(config), /explicitly disable built-in MCP/);
-  }
-});
-
 test('healthy session requires real read evidence and the configured model', () => {
   assert.equal(assertHealthy(createHealthyFixture().events, settings, marker), 'test/model');
 });
 
-test('native read results must not substitute for rw-hashline reading', () => {
+test('non-read tool results must not satisfy the native read check', () => {
   const fixture = createHealthyFixture();
-  fixture.read.toolName = 'read';
+  fixture.read.toolName = 'grep';
   assert.throws(() => assertHealthy(fixture.events, settings, marker));
 });
 

@@ -26,8 +26,6 @@ Reading, reviewing, or testing this skill does not authorize upgrades or Git cha
   - Leave Pi itself, project packages, Git sources, local packages, and maintained extension source files unchanged.
   - Without separate authorization, you must not perform configuration or data migrations.
 - **Tools and safety**
-  - Keep MCP disabled.
-  - Start nested Pi processes with `--no-mcp`.
   - Use installed tools and dependencies.
   - You must not add package managers or checking dependencies during this workflow.
 - **Authorization limits**
@@ -194,4 +192,4 @@ Reading, reviewing, or testing this skill does not authorize upgrades or Git cha
   - Report untested browser and native terminal behavior as `Not verified`.
   - Startup success does not prove complete feature compatibility.
   - After success or verified recovery, remove owned temporary state.
-  - Recommend restarting Pi with `pi --no-mcp --continue`.
+  - Recommend restarting Pi with `pi --continue`.

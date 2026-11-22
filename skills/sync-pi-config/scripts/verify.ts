@@ -9,7 +9,7 @@ import type { AgentToolResult, ExtensionError, JsonAgentSessionEvent, SessionHea
 import { parseTrustedJson, readJson } from '../../../scripts/verification-data.ts';
 
 export type VerificationSettings = Pick<ReturnType<SettingsManager['getGlobalSettings']>,
-  'extensions' | 'defaultProvider' | 'defaultModel' | 'defaultThinkingLevel' | 'modelThinkingLevels'>;
+  'defaultProvider' | 'defaultModel' | 'defaultThinkingLevel' | 'modelThinkingLevels'>;
 type ToolCompletion = Extract<JsonAgentSessionEvent, { type: 'tool_execution_end' }>;
 // Upstream leaves tool results untyped; Pi tools use AgentToolResult.
 export type VerificationEvent = SessionHeader
@@ -58,21 +58,6 @@ export async function validateConfig(agentDir: string, packageDir: string): Prom
   return settings;
 }
 
-export function assertMcpDisabled(settings: VerificationSettings) {
-  const extensions = settings.extensions ?? [];
-  const hasDisableEntry = extensions.includes('-builtin:mcp');
-  const hasEnableEntry = extensions.some(
-    (entry) => entry === 'builtin:mcp' || entry === '+builtin:mcp',
-  );
-
-  if (!hasDisableEntry || hasEnableEntry) {
-    throw new Error(
-      'Global settings must explicitly disable built-in MCP ' +
-        'without a conflicting enable entry',
-    );
-  }
-}
-
 export function assertHealthy(events: VerificationEvent[], settings: VerificationSettings, marker: string) {
   const assistant = events.filter((event) => event.type === 'message_end')
     .map((event) => event.message)
@@ -82,7 +67,7 @@ export function assertHealthy(events: VerificationEvent[], settings: Verificatio
   const readSucceeded = events.some(
     (event) =>
       event.type === 'tool_execution_end' &&
-      event.toolName === 'hashline_read' &&
+      event.toolName === 'read' &&
       !event.isError &&
       event.result?.content?.some((block) => block.type === 'text' && block.text?.includes(marker)),
   );
@@ -144,7 +129,7 @@ export function assertHealthy(events: VerificationEvent[], settings: Verificatio
 async function runSession(packageDir: string, packageInfo: PackageInfo, agentDir: string, cwd: string, onRecord: () => void): Promise<VerificationEvent[]> {
   const prompt = [
     'This is a read-only configuration smoke test.',
-    'Use the hashline_read tool to read healthcheck.txt in the current directory.',
+    'Use the native read tool to read healthcheck.txt in the current directory.',
     'Reply with exactly the file contents, without formatting or commentary.',
     'Do not invoke skills or run any other tasks.',
   ].join(' ');
@@ -157,7 +142,7 @@ async function runSession(packageDir: string, packageInfo: PackageInfo, agentDir
     '--no-approve',
     '--no-mcp',
     '--tools',
-    'hashline_read',
+    'read',
     prompt,
   ];
   const child = spawn(process.execPath, args, {
@@ -265,8 +250,6 @@ async function main() {
   try {
     log(`Verifying global config with installed Pi ${packageInfo.version}`);
     const settings = await validateConfig(agentDir, packageDir);
-    assertMcpDisabled(settings);
-    log('PASS: global settings explicitly disable built-in MCP');
 
     const sdkUrl = pathToFileURL(resolve(packageDir, packageInfo.main));
     const { loadSkillsFromDir }: typeof import('@earendil-works/pi-coding-agent') = await import(sdkUrl.href);
@@ -297,7 +280,7 @@ async function main() {
     });
     const model = assertHealthy(events, settings, marker);
     log(
-      `PASS: real session on ${model}; ` + 'hashline_read, exact reply, and settled lifecycle verified',
+      `PASS: real session on ${model}; ` + 'native read, exact reply, and settled lifecycle verified',
     );
   } finally {
     clearInterval(heartbeat);

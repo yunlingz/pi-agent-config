@@ -20,8 +20,7 @@ description: >
   - When the user requests sync or a local save, commit only reviewed changes within that request.
 - **Safety and checking**
   - You must not upgrade Pi, install runtime packages, push, change remotes, or alter credentials.
-  - Keep MCP disabled in every test.
-  - You must not load MCP adapters.
+  - Temporary test sessions disable built-in MCP to avoid unrelated connections.
   - When code changes require static checks, follow the global TypeScript rules.
 
 ## 1. Review the starting state
@@ -78,7 +77,7 @@ description: >
      ```
 
 - **Verifier coverage**
-  - The configuration verifier checks JSON schemas from the installed Pi, skill discovery, and the explicit setting that disables built-in MCP.
+  - The configuration verifier checks JSON schemas from the installed Pi and global skill discovery.
   - Its temporary Pi session uses the configured default model, reasoning level, authentication, and global resources.
   - The session must read a random marker and return it exactly within 90 seconds.
 

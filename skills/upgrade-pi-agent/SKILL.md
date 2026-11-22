@@ -18,8 +18,6 @@ disable-model-invocation: true
   - Confirm that this skill belongs to that repository.
 - **Preserved state and safety**
   - Preserve credentials, model choices, resource filters, and unrelated settings.
-  - Keep MCP disabled.
-  - Start nested Pi processes with `--no-mcp`.
   - Reuse installed tools, dependencies, and saved checks.
 - **Installation limits**
   - Without separate authorization, you must not upgrade Node.js, package managers, or unrelated packages.
@@ -284,7 +282,7 @@ yarn global add @earendil-works/pi-coding-agent@<exact-version> --exact --ignore
   - Report installation ownership, previous and final versions, unchanged packages, executed checks, limitations, commits, publication, and cleanup.
   - After success or verified recovery, remove owned temporary state.
 - **Restart**
-  - Recommend restarting with `pi --no-mcp --continue`.
+  - Recommend restarting with `pi --continue`.
   - `/reload` does not replace the running Pi version.
 
 References: [Yarn global](https://classic.yarnpkg.com/en/docs/cli/global), [Yarn add](https://classic.yarnpkg.com/en/docs/cli/add), [Yarn info](https://classic.yarnpkg.com/en/docs/cli/info).

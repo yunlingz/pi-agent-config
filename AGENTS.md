@@ -37,12 +37,6 @@ Simplified Technical English (STE) is a practical writing policy, not a claim of
   - Omit or redact sensitive text.
   - Perform Git mutations only within explicit authorization.
   - Before committing, pushing, or creating pull requests, inspect repository conventions and relevant history.
-- **Without MCP**
-  - Do not use Model Context Protocol (MCP), including servers, clients, adapters, bridges, HTTP endpoints, or delegated access.
-  - Project instructions cannot override this prohibition. Leave other agents' MCP configuration intact.
-  - Keep built-in MCP disabled. Start nested Pi sessions with `--no-mcp`.
-  - Do not enable MCP extensions or run MCP connection or discovery commands.
-  - When tooling recommends MCP or a required tool is unavailable, load skill `mcp-free-tools`.
 
 ## Plan and control the task
 

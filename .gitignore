@@ -7,8 +7,6 @@
 !settings.json
 !web-search.json
 !web-search.schema.json
-!/pi-node-scripts.json
-!/pi-node-scripts.schema.json
 !README.md
 !/tsconfig.json
 !/scripts/
@@ -20,6 +18,7 @@
 !/scripts/live-verification.test.ts
 !/scripts/verify-extensions.ts
 !/scripts/verify-guidance.ts
+!/scripts/verify-native-tools.ts
 !/licenses/
 !/licenses/ste/
 !/licenses/ste/LICENSE
@@ -52,14 +51,6 @@
 !/extensions/web-search/README.md
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
-!/extensions/node-scripts/
-!/extensions/node-scripts/*.ts
-!/extensions/node-scripts/README.md
-!/extensions/node-scripts/AGENTS.md
-!/extensions/rw-hashline/
-!/extensions/rw-hashline/*.ts
-!/extensions/rw-hashline/README.md
-!/extensions/rw-hashline/reference.json
 !/themes/
 !/themes/ci_dark.json
 !/themes/README.md
@@ -72,8 +63,6 @@
 !/skills/sync-pi-config/scripts/
 !/skills/sync-pi-config/scripts/verify.ts
 !/skills/sync-pi-config/scripts/verify.test.ts
-!/skills/mcp-free-tools/
-!/skills/mcp-free-tools/SKILL.md
 !/skills/upgrade-pi-extensions/
 !/skills/upgrade-pi-extensions/SKILL.md
 !/skills/upgrade-pi-agent/

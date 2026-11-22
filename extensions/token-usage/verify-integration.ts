@@ -14,7 +14,6 @@ import {
 } from "../../scripts/test-fixtures.ts";
 import { readJson, readPackageInfo, resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { STATUS_KEY } from "./token-usage.ts";
-const RW_HASHLINE_STATUS_KEY = "rw-hashline";
 
 const argument = process.argv[2];
 assert.ok(argument, "Usage: node verify-integration.ts <installed-pi-package-directory>");
@@ -265,18 +264,17 @@ try {
   const config = configApi.parsePowerlineConfig(globalSettings.powerline, Object.keys(presets.PRESETS));
   assert.deepEqual(config.invalidLayoutSegments, []);
   assert.deepEqual(config.invalidDisabledSegments, []);
-  assert.deepEqual(config.customItems.map((item) => item.id), ["web_search", "rw_hashline", "node_scripts", "token_usage"]);
+  assert.deepEqual(config.customItems.map((item) => item.id), ["web_search", "token_usage"]);
   const preset = presets.getPreset(config.preset);
   const layout = configApi.mergeSegmentsWithCustomItems(preset, config.customItems, config);
   assert.deepEqual(layout.leftSegments, [
-    "model", "thinking", "custom:web_search", "custom:rw_hashline", "custom:node_scripts", "shell_mode", "path", "git", "queue",
+    "model", "thinking", "custom:web_search", "shell_mode", "path", "git", "queue",
     "context_pct", "custom:token_usage",
   ]);
   assert.deepEqual(layout.rightSegments, preset.rightSegments);
   assert.deepEqual(layout.secondarySegments, preset.secondarySegments);
   const hidden = configApi.collectHiddenExtensionStatusKeys(config.customItems);
   assert.ok(hidden.has(STATUS_KEY));
-  assert.ok(hidden.has(RW_HASHLINE_STATUS_KEY));
   const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
   const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory)).href);
   for (const mode of ["truecolor", "256color"] as const) {
@@ -292,23 +290,6 @@ try {
     assert.equal(rendered.visible, true);
     assert.equal(rendered.content, theme.fg("muted", expected));
     assert.equal(tui.visibleWidth(rendered.content), expected.length);
-    for (const status of ["rw-hashline: on", "rw-hashline: off"]) {
-      statuses.set(RW_HASHLINE_STATUS_KEY, status);
-      const rwHashline = segments.renderSegment("custom:rw_hashline", context);
-      assert.equal(rwHashline.visible, true);
-      assert.equal(rwHashline.content, theme.fg("muted", status));
-      assert.equal(tui.visibleWidth(rwHashline.content), status.length);
-      assert.equal(segments.renderSegment("extension_statuses", context).visible, false);
-    }
-    for (const status of ["node-scripts: on", "node-scripts: off", "node-scripts: error"]) {
-      statuses.set("node-scripts", status);
-      const scripts = segments.renderSegment("custom:node_scripts", context);
-      assert.equal(scripts.visible, true);
-      assert.equal(scripts.content, theme.fg("muted", status));
-      assert.equal(tui.visibleWidth(scripts.content), status.length);
-    }
-    statuses.delete("node-scripts");
-    statuses.delete(RW_HASHLINE_STATUS_KEY);
     assert.equal(segments.renderSegment("extension_statuses", context).visible, false);
     for (const width of [60, 100, 160]) assert.ok(tui.visibleWidth(rendered.content) <= width);
   }
