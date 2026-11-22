@@ -20,7 +20,7 @@ const jiti = createJiti(import.meta.url, { fsCache: join(root, "jiti"), alias: {
 const { colorSurfaceOutput, installSurfaceDefaults } = await jiti.import<typeof Surfaces>(new URL("./surfaces.ts", import.meta.url).pathname);
 const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") =
   await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
-const theme = themeApi.loadThemeFromPath(new URL("./ci_dark.json", import.meta.url).pathname, "truecolor");
+const theme = themeApi.loadThemeFromPath(new URL("./ci-dark.json", import.meta.url).pathname, "truecolor");
 const defaults = "\x1b[38;2;246;248;250m\x1b[48;2;36;41;46m";
 
 test("default colors replace resets without recoloring explicit syntax or panels", () => {
@@ -40,7 +40,7 @@ test("links, image payloads, and cursor controls stay unchanged", () => {
   assert.equal(colorSurfaceOutput(input, theme), input);
 });
 
-test("Powerline prompt and separator colors use ci_dark roles", () => {
+test("Powerline prompt and separator colors use ci-dark roles", () => {
   assert.equal(colorSurfaceOutput("\x1b[38;2;200;200;200m>\x1b[38;5;244m|", theme), `${theme.getFgAnsi("text")}>${theme.getFgAnsi("dim")}|`);
 });
 

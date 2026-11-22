@@ -251,7 +251,7 @@ try {
   const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
   const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory)).href);
   for (const mode of ["truecolor", "256color"] as const) {
-    const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci_dark.json"), mode);
+    const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci-dark.json"), mode);
     const context = {
       theme,
       colors: preset.colors,

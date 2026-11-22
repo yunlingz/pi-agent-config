@@ -12,14 +12,14 @@ const packageArgument = process.argv[2];
 assert.ok(packageArgument, "Usage: node themes/verify.ts <installed-pi-package-directory>");
 const packageDirectory = resolve(packageArgument);
 const agentDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
-const themePath = join(agentDirectory, "themes", "ci_dark.json");
+const themePath = join(agentDirectory, "themes", "ci-dark.json");
 const packageInfo = readPackageInfo(join(packageDirectory, "package.json"));
 assert.equal(packageInfo.name, "@earendil-works/pi-coding-agent");
 const require = createRequire(pathToFileURL(join(packageDirectory, "package.json")));
 let themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") | undefined;
 let succeeded = false;
 const heartbeat = setInterval(() => {
-  process.stderr.write(`[${new Date().toISOString()}] Checking ci_dark with installed Pi ${packageInfo.version}\n`);
+  process.stderr.write(`[${new Date().toISOString()}] Checking ci-dark with installed Pi ${packageInfo.version}\n`);
 }, 20_000);
 
 function contrast(first: RgbColor, second: RgbColor) {
@@ -38,7 +38,7 @@ try {
   const { Check }: { Check(schema: unknown, value: unknown): boolean } = await import(pathToFileURL(require.resolve("typebox/value")).href);
   const schema = readJson(join(packageDirectory, "schemas", "theme.schema.json"));
   const document = readJson(themePath);
-  assert.ok(Check(schema, document), "ci_dark must match the installed theme schema");
+  assert.ok(Check(schema, document), "ci-dark must match the installed theme schema");
 
   const moduleDirectory = join(packageDirectory, "dist", "modes", "interactive", "theme");
   const activeThemeApi: NonNullable<typeof themeApi> = await import(pathToFileURL(join(moduleDirectory, "theme.js")).href);
@@ -48,7 +48,7 @@ try {
   const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(require.resolve("@earendil-works/pi-tui")).href);
   activeThemeApi.setThemeJsonValidator(validateThemeJson);
   const validatedTheme = validateThemeJson(themePath, document);
-  assert.equal(validatedTheme.name, "ci_dark");
+  assert.equal(validatedTheme.name, "ci-dark");
   assert.equal(validatedTheme.appearance, "dark");
   assert.deepEqual(Object.keys(validatedTheme.colors).sort(), Object.keys(THEME_TOKENS).sort());
 
@@ -101,7 +101,7 @@ try {
         effective[token] = tui.colorToRgb(tui.indexedColor(Number(match[1])));
       }
     }
-    // The terminal owns its canvas; assess unboxed text against ci_dark's recommended background.
+    // The terminal owns its canvas; assess unboxed text against ci-dark's recommended background.
     const background = validatedTheme.vars?.background;
     assert.ok(background !== undefined);
     effective.background = tui.colorToRgb(tui.parseColor(background));
@@ -159,5 +159,5 @@ try {
 } finally {
   themeApi?.stopThemeWatcher();
   clearInterval(heartbeat);
-  process.stderr.write(`${succeeded ? "SUCCESS" : "FAILED"}: ci_dark theme verification\n`);
+  process.stderr.write(`${succeeded ? "SUCCESS" : "FAILED"}: ci-dark theme verification\n`);
 }

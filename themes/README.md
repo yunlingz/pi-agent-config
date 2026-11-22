@@ -1,10 +1,10 @@
-# ci_dark for Pi
+# ci-dark for Pi
 
-[ci_dark.json](ci_dark.json) uses the original [iTerm palette](https://github.com/yunlingz/ci_dark/blob/master/term/ci_dark.itermcolors).
+[ci-dark.json](ci-dark.json) uses the original [iTerm palette](https://github.com/yunlingz/ci_dark/blob/master/term/ci_dark.itermcolors).
 Its background is `#24292e`, foreground `#f6f8fa`, and accents use the source RGB values.
 Derived dark panels and neutral metadata preserve readable contrast in truecolor and 256-color modes.
 
-Select `ci_dark` in `/settings` or set `"theme": "ci_dark"` in the active agent directory's settings.
+Select `ci-dark` in `/settings` or set `"theme": "ci-dark"` in the active agent directory's settings.
 Pi hot-reloads the selected theme file. Use `/reload` after changing extension code or footer overrides.
 
 ## Complete terminal surfaces

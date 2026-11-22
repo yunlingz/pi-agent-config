@@ -1,5 +1,5 @@
 {
-  "theme": "ci_dark",
+  "theme": "ci-dark",
   "defaultProvider": "existing_gateway",
   "defaultModel": "gpt-6.1-sol",
   "transport": "sse",

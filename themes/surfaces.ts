@@ -3,9 +3,9 @@ import { backgroundAnsi, type TUI } from "@earendil-works/pi-tui";
 
 /** Fill default-colored regions without replacing explicit syntax or panel colors. */
 export function colorSurfaceOutput(data: string, theme: Theme): string {
-  if (theme.name !== "ci_dark") return data;
+  if (theme.name !== "ci-dark") return data;
   const foreground = theme.getFgAnsi("text");
-  // ci_dark uses the canvas color for text on its yellow search highlight.
+  // ci-dark uses the canvas color for text on its yellow search highlight.
   const background = backgroundAnsi(theme.colors.searchMatchText, theme.getColorMode());
   const defaults = foreground + background;
   const output = data.replace(/\x1b\[([0-9;]*)m/gu, (sequence, parameters: string) => {
@@ -48,7 +48,7 @@ export function installSurfaceDefaults(tui: TUI, theme: Theme): () => void {
     originalWrite.call(terminal, colorSurfaceOutput(combined.slice(0, combined.length - pending.length), theme));
   };
   terminal.write = write;
-  if (theme.name === "ci_dark") originalWrite.call(terminal, colorSurfaceOutput("\x1b[0m", theme));
+  if (theme.name === "ci-dark") originalWrite.call(terminal, colorSurfaceOutput("\x1b[0m", theme));
   tui.requestRender(true);
   return () => {
     if (terminal.write !== write) return;

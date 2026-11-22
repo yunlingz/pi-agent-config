@@ -9,7 +9,7 @@ Use `/reload` after changing local extensions, skills, or settings.
 - [settings.json](settings.json): native tools, model defaults, packages, compaction, and footer layout.
 - [models.json](models.json): Responses models with text/image support and per-model reasoning maps.
 - [web-search.json](web-search.json): exact model allowlist for independent web research.
-- [ci_dark](themes/README.md): terminal UI and export colors from the original iTerm palette.
+- [ci-dark](themes/README.md): terminal UI and export colors from the original iTerm palette.
 - [AGENTS.md](AGENTS.md): global working preferences and English STE writing policy.
 - [TYPESCRIPT.md](TYPESCRIPT.md): maintained-code rules with one strict [tsconfig.json](tsconfig.json).
 

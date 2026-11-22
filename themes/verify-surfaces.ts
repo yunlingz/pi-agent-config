@@ -30,11 +30,11 @@ export async function verifySurfaces(packageDirectory: string): Promise<void> {
         const agent = join(root, `${layout}-${terminalBackground.slice(1)}`);
         await mkdir(join(agent, "themes"), { recursive: true });
         await mkdir(join(agent, "extensions/powerline-footer"), { recursive: true });
-        await writeFile(join(agent, "themes/ci_dark.json"), await readFile(join(agentDirectory, "themes/ci_dark.json")));
+        await writeFile(join(agent, "themes/ci-dark.json"), await readFile(join(agentDirectory, "themes/ci-dark.json")));
         await writeFile(join(agent, "extensions/powerline-footer/theme.json"), await readFile(join(agentDirectory, "extensions/powerline-footer/theme.json")));
         await symlink(join(agentDirectory, "bin"), join(agent, "bin"));
         const settings = sdk.SettingsManager.inMemory({
-          theme: "ci_dark", quietStartup: true, cacheWarming: "off", retry: { enabled: false }, compaction: { enabled: false },
+          theme: "ci-dark", quietStartup: true, cacheWarming: "off", retry: { enabled: false }, compaction: { enabled: false },
           packages: [], terminal: { trueColor: true, images: false }, defaultTools: ["read", "write", "edit", "bash"],
         });
         await writeFile(join(agent, "settings.json"), JSON.stringify({ workingVibe: "off", powerline: saved.powerline }));
@@ -98,8 +98,8 @@ export async function verifySurfaces(packageDirectory: string): Promise<void> {
           const column = lines[row].indexOf("INPUT_SURFACE");
           const line = screen.buffer.active.getLine(row);
           assert(line);
-          assert.equal(line.getCell(column)?.getFgColor(), 0xf6f8fa, "Editor text must use ci_dark, not terminal defaults.");
-          assert.equal(line.getCell(column)?.getBgColor(), 0x24292e, "Editor background must use ci_dark.");
+          assert.equal(line.getCell(column)?.getFgColor(), 0xf6f8fa, "Editor text must use ci-dark, not terminal defaults.");
+          assert.equal(line.getCell(column)?.getBgColor(), 0x24292e, "Editor background must use ci-dark.");
         };
         checkEditor();
         for (let row = 0; row < screen.rows; row++) {
@@ -118,11 +118,11 @@ export async function verifySurfaces(packageDirectory: string): Promise<void> {
         assert(themeApi.setTheme("dark", false).success);
         await pause();
         await flush();
-        assert(themeApi.setTheme("ci_dark", false).success);
+        assert(themeApi.setTheme("ci-dark", false).success);
         await pause();
         await flush();
         checkEditor();
-        const themePath = join(agent, "themes/ci_dark.json");
+        const themePath = join(agent, "themes/ci-dark.json");
         const originalTheme = await readFile(themePath, "utf8");
         await writeFile(themePath, originalTheme.replace('"background": "#24292e"', '"background": "#202020"'));
         // setTheme(name) reuses the registry; the host's watcher reloads a fresh instance from disk.

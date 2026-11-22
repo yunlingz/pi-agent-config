@@ -54,7 +54,7 @@
 !/extensions/powerline-footer/
 !/extensions/powerline-footer/theme.json
 !/themes/
-!/themes/ci_dark.json
+!/themes/ci-dark.json
 !/themes/README.md
 !/themes/verify.ts
 !/themes/surfaces.ts

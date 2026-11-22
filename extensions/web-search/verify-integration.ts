@@ -407,7 +407,7 @@ try {
   }
   try {
     for (const colorMode of ["truecolor", "256color"] as const) {
-      const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci_dark.json"), colorMode);
+      const theme = themeApi.loadThemeFromPath(join(agentDirectory, "themes/ci-dark.json"), colorMode);
       themeApi.setThemeInstance(theme);
       for (const value of ["web: on", "web: off", "web: unavailable", "web: invalid setting"]) {
         statuses.set("web-search", value);

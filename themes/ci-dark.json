@@ -1,6 +1,6 @@
 {
   "$schema": "https://pi.dev/schemas/theme.schema.json",
-  "name": "ci_dark",
+  "name": "ci-dark",
   "appearance": "dark",
   "vars": {
     "background": "#24292e",
