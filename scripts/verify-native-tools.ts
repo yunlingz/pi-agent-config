@@ -27,7 +27,7 @@ try {
   const require = createRequire(join(packageDirectory, "package.json"));
   const { Type }: typeof import("typebox") = await import(pathToFileURL(require.resolve("typebox")).href);
   const saved = readJson<ReturnType<SettingsManager["getGlobalSettings"]>>(join(agentDirectory, "settings.json"));
-  assert.deepEqual(saved.defaultTools, nativeNames, "All retained native tools must be enabled by default.");
+  assert.deepEqual([...(saved.defaultTools ?? [])].sort(), [...nativeNames].sort(), "All retained native tools must be enabled by default.");
   const settings = sdk.SettingsManager.inMemory({
     ...saved,
     enabledModels: [], defaultProvider: "native-tools-fixture", defaultModel: "fixture", defaultThinkingLevel: "off", modelThinkingLevels: {},

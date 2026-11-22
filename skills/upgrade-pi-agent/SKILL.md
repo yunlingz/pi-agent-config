@@ -9,121 +9,62 @@ disable-model-invocation: true
 
 # Upgrade global Pi and extensions
 
-## Required boundaries
+## Scope and prerequisites
 
-- **Authorization and repository**
-  - Honor the explicit request. Reading or reviewing this skill does not authorize upgrades or Git changes.
-  - When `PI_CODING_AGENT_DIR` is set, use it as the active agent directory.
-  - Otherwise, use `~/.pi/agent`.
-  - Confirm that this skill belongs to that repository.
-- **Preserved state and safety**
-  - Preserve credentials, model choices, resource filters, and unrelated settings.
-  - Reuse installed tools, dependencies, and saved checks.
-- **Installation limits**
-  - Without separate authorization, you must not upgrade Node.js, package managers, or unrelated packages.
-  - You must not use `pi update`, broad package upgrades, upstream installers, or direct edits to installed code.
-  - Use the existing installation's package manager for upgrades and recovery.
-  - You must not change package managers or create a second Pi installation.
-- **Execution safety**
-  - Before installation or recovery, read and follow [Upgrade execution safety](references/execution-safety.md).
-  - On Windows, prepare host upgrades for an external terminal; all Pi processes using that installation must exit first.
+- Honor explicit upgrade and Git authorization; reading this skill authorizes neither.
+- Use `PI_CODING_AGENT_DIR` when set; otherwise use `~/.pi/agent`. Confirm this skill belongs to that repository.
+- Preserve credentials, models, resource filters, and unrelated settings.
+- Use the existing installation and its manager; do not create another installation or change managers.
+- Node.js, package managers, unrelated packages, and migrations require separate authorization.
+- Do not use `pi update`, broad upgrades, upstream installers, or direct edits to installed code.
+- Do not use `--ignore-engines`, `--force`, or flags that refresh unrelated dependencies.
+
+Load [Upgrade execution safety](references/execution-safety.md) before installation or recovery.
+It owns registry enforcement, path handling, preflight, native-file locks, and recovery safety.
+Load [sync-pi-config](../sync-pi-config/SKILL.md) for checks, acceptance, saving, and evidence reporting.
 
 ## 1. Identify the installation
 
-- **Executable discovery**
-  - On Windows, use `where.exe pi` to locate the selected shim.
-  - Elsewhere, use `command -v pi` to locate the selected executable.
-  - A package manager's presence on `PATH` does not prove that it owns the active Pi installation.
-- **Procedure**
-  1. Inspect Git status, staged and unstaged diffs, recent commits, and the requested branch scope.
-  2. When unrelated settings changes or staged work prevent safe recovery, stop before installation.
-  3. Locate the active `pi` executable.
-  4. Resolve its symlink or shim target.
-  5. Read the target package's name, version, and executable mapping from `package.json`.
-  6. Record the active Node.js version and package manager version.
+Unrelated settings changes or staged work must not prevent safe recovery.
 
-### Compare installation locations
+1. Inspect Git status, diffs, history, and requested branch scope.
+2. Locate the active executable with `where.exe pi` on Windows or `command -v pi` elsewhere.
+3. Resolve its shim or symlink to the installed package.
+4. Read its manifest name, version, executable mapping, and runtime requirements.
+5. Record Node.js and the owning manager's version.
 
-- **npm locations**
-  - For npm, inspect these locations:
+A manager on `PATH` does not prove ownership. Match the resolved executable to its recorded package location.
 
-    ```text
-    npm --version
-    npm prefix --global
-    npm root --global
-    ```
+| Manager | Discovery commands |
+| --- | --- |
+| npm | `npm --version`, `npm prefix --global`, `npm root --global` |
+| Yarn Classic | `yarn --version`, `yarn global dir`, `yarn global bin` |
 
-  - Record the confirmed global prefix and package root.
-- **Yarn Classic locations**
-  - For Yarn Classic, inspect these locations:
-
-    ```text
-    yarn --version
-    yarn global dir
-    yarn global bin
-    ```
-
-  - Yarn Classic means Yarn 1.x.
-  - Yarn 2 and later require a different procedure.
-  - Record the global directory, binary directory, and Pi dependency in the global manifest.
-  - Derive the binary prefix from the parent of the reported binary directory.
-  - Confirm that `yarn global bin --prefix <confirmed-bin-prefix>` returns the recorded binary directory.
-- **Ownership decision**
-  - Match the active executable target to the package inside the reported global package directory.
-  - When ownership is ambiguous or Pi uses another installation method, report the blocker.
+Yarn Classic means Yarn 1.x; newer Yarn requires a different procedure.
+Its global package directory and binary prefix can differ.
+Derive the binary prefix from the reported binary directory and confirm it with `yarn global bin --prefix <confirmed-bin-prefix>`.
+When ownership remains ambiguous, stop and report the missing prerequisite.
 
 ### Establish the baseline
 
-- **Required verification plan**
-  - Before installation, define required offline checks, live checks, affected integrations, and known coverage gaps.
-  - Require fresh live configuration verification and applicable feature checks after upgrading Pi.
-  - Use the upgrade requirements in [sync-pi-config](../sync-pi-config/SKILL.md) to determine feature applicability.
-  - When real model requests are prohibited or unavailable, report the blocker before installation.
-- **Private and concurrent data**
-  - You must not copy credentials or session contents.
-  - You must not restore whole files over concurrent edits.
-- **Procedure**
-  1. Run required checks from [sync-pi-config](../sync-pi-config/SKILL.md), including offline plugin checks.
-  2. When a baseline check fails, stop before upgrading.
-  3. Pass the shared read-only preflight before using any new installation or verification helper.
-  4. Record recovery versions, installation locations, extension pins, and relevant settings in owned private temporary state.
-  5. For Yarn Classic, retain its global manifest and lockfile as recovery evidence.
+1. Define required checks and coverage gaps under `sync-pi-config`.
+2. Pass baseline checks and the shared read-only preflight.
+3. Record recovery version, installation paths, pins, and relevant non-secret settings in owned private temporary state.
+4. Retain Yarn's global manifest and lockfile as recovery evidence when applicable.
 
-## 2. Select a version through the company registry
+Do not copy credentials or session contents. Do not proceed after a failed baseline.
 
-- **Registry and safety**
-  - Use only `https://packagefeedproxy.microsoft.io/npm/` for package metadata, downloads, installation, and recovery.
-  - You must not change unrelated configuration, switch registries, disable TLS validation, or run lifecycle scripts.
-  - Keep proxy and credential values out of logs.
-- **Procedure**
-  1. Check scoped registry overrides, configured package commands, artifact URLs, and existing lockfile sources for conflicts.
-  2. When sources conflict, establish an approved route or report the blocker.
-- **npm child commands**
-  - A registry flag alone does not restrict every absolute artifact URL.
-  - For Pi-managed npm child commands, use these values in each child process:
+## 2. Select a release
 
-    ```text
-    npm_config_registry=https://packagefeedproxy.microsoft.io/npm/
-    npm_config_fetch_retries=0
-    npm_config_fetch_timeout=20000
-    npm_config_ignore_scripts=true
-    ```
+Use only the registry and child-process controls in the shared safety reference.
 
-- **Yarn Classic flags**
-  - Use explicit registry, script, network-timeout, and non-interactive flags.
-  - You must not assume that npm retry settings control Yarn's retries.
-- **Timeouts and temporary state**
-  - Use a 30-second outer limit for metadata requests.
-  - For installation, use an explicit longer limit.
-  - Follow the active execution tools' progress, cancellation, and temporary-state contracts.
-
-### Query npm metadata
+### npm metadata
 
 ```text
 npm view @earendil-works/pi-coding-agent dist-tags versions engines --json --registry=https://packagefeedproxy.microsoft.io/npm/ --fetch-retries=0 --fetch-timeout=20000
 ```
 
-### Query Yarn Classic metadata
+### Yarn Classic metadata
 
 ```text
 yarn info @earendil-works/pi-coding-agent dist-tags.latest --json --registry=https://packagefeedproxy.microsoft.io/npm/ --network-timeout 20000 --non-interactive
@@ -131,158 +72,66 @@ yarn info @earendil-works/pi-coding-agent versions --json --registry=https://pac
 yarn info @earendil-works/pi-coding-agent@<exact-version> engines --json --registry=https://packagefeedproxy.microsoft.io/npm/ --network-timeout 20000 --non-interactive
 ```
 
-- **Yarn output**
-  - Yarn emits JSON lines.
-  - Read the `inspect` record's `data`.
-  - You must not parse all Yarn output as one JSON document.
+Yarn returns JSON lines; read the `inspect` record's `data`, not the entire output as one JSON value.
 
-### Select the candidate
+1. Compare eligible stable releases with installed `semver`.
+2. Check runtime requirements and relevant release notes.
+3. Select a literal version only after compatibility is established.
 
-- **Version limits**
-  - When the company registry is behind the installed version, you must not downgrade.
-  - When no newer eligible release exists, keep Pi unchanged.
-  - Continue only with authorized extension work.
-- **Missing prerequisites**
-  - When prerequisites are missing, report them.
-  - You must not upgrade unrelated tools or ignore engine checks to satisfy prerequisites.
-- **Procedure**
-  1. Use installed `semver` to compare stable versions available from the company registry.
-  2. Treat `latest` as a candidate, not proof of stability or compatibility.
-  3. Check the selected version's requirements and relevant release notes before installation.
+`latest` is a candidate, not proof of compatibility. Never downgrade when the registry is behind.
+If no newer eligible release exists, retain Pi and continue only separately authorized extension work.
+Do not upgrade unrelated tools to satisfy missing prerequisites.
 
-## 3. Upgrade Pi through its existing manager
+## 3. Install through the existing manager
 
-- **Command constraints**
-  - Use verified locations and a literal version in place of each placeholder.
-  - You must not install a movable tag such as `latest`.
-  - Run exactly one installation path.
-  - You must not run both paths or change the installation's package manager.
-- **Prohibited flags**
-  - You must not add `--ignore-engines`, `--force`, or flags that refresh unrelated dependencies.
+Use confirmed paths and one installation route. Do not install movable tags.
+On Windows, follow the shared lock rules and run host replacement externally after owning Pi processes exit.
 
-### npm global installation
+### npm
 
 ```text
 npm install --global --prefix "<confirmed-prefix>" --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@<exact-version> --registry=https://packagefeedproxy.microsoft.io/npm/ --fetch-retries=0 --fetch-timeout=20000
 ```
 
-### Yarn Classic global installation
+### Yarn Classic
 
 ```text
 yarn global add @earendil-works/pi-coding-agent@<exact-version> --exact --ignore-scripts --global-folder "<confirmed-global-dir>" --prefix "<confirmed-bin-prefix>" --registry=https://packagefeedproxy.microsoft.io/npm/ --network-timeout 20000 --non-interactive
 ```
 
-- **Storage and version flags**
-  - `--global-folder` selects package storage.
-  - `--prefix` selects the binary prefix; these locations can differ.
-  - `--exact` saves the literal direct dependency version in Yarn's global manifest.
+`--global-folder` controls package storage; `--prefix` controls binaries; `--exact` saves the direct literal dependency.
 
-### Check the installation
-
-- **Live verification constraints**
-  - Use the commands in section 4 and [sync-pi-config](../sync-pi-config/SKILL.md).
-  - Preserve the configured provider, model, reasoning level, and authentication.
-  - Results from before installation do not verify the upgraded Pi.
-  - You must not silently omit required checks or substitute another model to obtain success.
-- **Procedure**
-  1. Resolve the active executable again.
-  2. Confirm that the executable still uses the recorded installation.
-  3. Confirm that a fresh `pi --version` matches the selected installed manifest.
-  4. For Yarn Classic, confirm that its global manifest records Pi's exact version.
-  5. Check package metadata and dependency changes for unrelated global packages.
-  6. Confirm that Pi configuration, credentials, and exact extension pins remain unchanged.
-  7. Run the full offline plugin workflow against the newly installed Pi.
-  8. Run fresh live configuration verification with global extensions loaded.
-  9. Run applicable live compaction and search checks.
-  10. Accept the Pi upgrade only after all required checks pass, before changing extensions.
+1. Await installer termination.
+2. Resolve the executable again and confirm ownership stayed unchanged.
+3. Compare `pi --version` and the installed manifest with the selected version.
+4. Check the global manifest and dependency changes for unrelated packages.
+5. Confirm preserved configuration, credentials, and exact extension pins.
+6. Pass Pi-upgrade acceptance checks from `sync-pi-config` before changing extensions.
 
 ### Recover a failed upgrade
 
-- **Recovery command and limits**
-  - For Yarn Classic, use the same `global add` command with the recorded previous version.
-  - Reinstalling an exact direct version does not guarantee restoration of every transitive dependency.
-  - You must not overwrite concurrent changes with saved manifests or lockfiles.
-  - You must not terminate the caller's running Pi session.
-  - Classify failures using the shared execution safety rules before changing packages.
-  - When native-file locks block replacement, stop and require external recovery after the owning processes exit.
-- **Procedure**
+Classify helper, provider, installation, and lock failures under the shared reference.
+Use the same installation command with the prior literal version; do not overwrite concurrent manifests or lockfiles.
 
-  When installation or a valid required host check fails:
+1. Stop and await the installer.
+2. Reinstall the prior version through the same manager, paths, registry, and safety flags.
+3. Verify executable ownership, version, and settings.
+4. Pass restoration checks from `sync-pi-config`.
 
-  1. Stop the installer.
-  2. Await its exit.
-  3. Reinstall the previous literal Pi version with the same manager, locations, registry, and safety flags.
-  4. Verify executable ownership, installed version, and settings.
-  5. Run required offline checks against the restored Pi.
-  6. Run fresh live configuration verification and affected feature checks against the restored Pi.
+If recovery fails, stop without a final commit or push. Report required private recovery inputs and retained cleanup paths.
 
-- **Failure diagnosis**
-  - Use offline evidence to distinguish provider outages from upgrade defects.
-  - When a provider outage prevents required verification, you must not accept the upgrade.
-  - When a required check has not run, you must not accept the upgrade.
-- **Recovery failure**
-  - When recovery fails, stop without a final commit or push.
-  - Report the blocker and necessary private recovery inputs.
-- **Cleanup report**
-  - Report retained cleanup paths and installation warnings.
+## 4. Extensions and publication
 
-## 4. Upgrade extensions and verify compatibility
+Load [upgrade-pi-extensions](../upgrade-pi-extensions/SKILL.md) for separately authorized third-party extension upgrades.
+Keep extension packages separate from the host installation. Defer their settings commit until combined checks pass.
 
-- **Extension procedure**
-  - Read [upgrade-pi-extensions](../upgrade-pi-extensions/SKILL.md) before upgrading extension packages.
-  - Follow its exact pins, exclusions, registry controls, candidate checks, and recovery rules.
-  - Defer its settings commit until the full compatibility checks pass.
-- **Package separation**
-  - Pi manages extension packages separately from its own npm or Yarn installation.
-  - You must not move extension packages into the host package manager's global directory.
+Use `sync-pi-config` to save only verified changes with the requested commit grouping.
+Publication requires explicit branch, push, and rebase authorization; previous requests do not supply it.
+Before publication, inspect history and remote state. Do not force-push, amend, or bypass hooks.
+When history diverges or authentication fails, report the blocker.
+After publication, compare remote branch hashes with intended local commits.
 
-- **Check commands**
-  - Run saved checks from the active agent directory:
-
-    ```text
-    node scripts/verify-extensions.ts <installed-pi-package-directory> offline
-    node themes/verify.ts <installed-pi-package-directory>
-    node skills/sync-pi-config/scripts/verify.ts <installed-pi-package-directory>
-    ```
-
-- **Coverage and reuse**
-  - The offline checks cover maintained plugins, automatic parallel compaction, lifecycle safeguards, usage, search controls, and rendering.
-  - The configuration verifier uses the configured default model, reasoning level, authentication, and resources in a temporary read-only session.
-  - It makes real model requests.
-  - It does not test every extension feature.
-  - After each changed or restored installation, run its required checks with fresh results.
-  - When no relevant package, code, or settings changed after a successful check, reuse that result.
-- **Required live checks and limits**
-  - After upgrading Pi, run fresh live configuration verification and applicable live compaction and search checks.
-  - After each extension candidate, follow that skill's requirements for fresh configuration and affected feature checks.
-  - Use the saved live commands and capability rules in [sync-pi-config](../sync-pi-config/SKILL.md).
-  - Preserve the configured provider, model, reasoning level, and authentication.
-  - You must not substitute a provider or model to obtain success.
-  - Report unrun checks and untested browser or native terminal behavior as `Not verified`.
-  - Startup and basic agent operation do not establish complete third-party feature compatibility.
-- **Failed checks and corrections**
-  - When a required check fails, compare installed contracts and release notes before changing tests.
-  - Fix only authorized defects.
-  - You must not weaken assertions or omit failing cases to keep an upgrade.
-  - For maintained TypeScript changes, follow the shared strict checking procedure.
-
-## 5. Save and publish authorized changes
-
-- **Publication limits**
-  - You must not infer push, rebase, or cross-branch authorization from remote configuration or previous tasks.
-  - Before authorized publication, inspect branch history and remote state.
-  - You must not force-push, amend, or bypass hooks.
-  - When history diverges or authentication fails, report the blocker.
-  - After publication, compare each remote branch hash with the intended local commit.
-- **Procedure**
-  1. When required checks remain unresolved, block final commits.
-  2. Use [sync-pi-config](../sync-pi-config/SKILL.md) to save authorized configuration changes.
-  3. Honor the requested commit grouping and branch workflow.
-- **Report and cleanup**
-  - Report installation ownership, previous and final versions, unchanged packages, executed checks, limitations, commits, publication, and cleanup.
-  - After success or verified recovery, remove owned temporary state.
-- **Restart**
-  - Recommend restarting with `pi --continue`.
-  - `/reload` does not replace the running Pi version.
+Report ownership, versions, unchanged packages, checks, limitations, commits, publication, and cleanup.
+Recommend `pi --continue` after success or verified recovery; `/reload` cannot replace the running Pi version.
 
 References: [Yarn global](https://classic.yarnpkg.com/en/docs/cli/global), [Yarn add](https://classic.yarnpkg.com/en/docs/cli/add), [Yarn info](https://classic.yarnpkg.com/en/docs/cli/info).

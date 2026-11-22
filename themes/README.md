@@ -1,57 +1,37 @@
 # ci_dark for Pi
 
-`ci_dark.json` is a portable Pi theme derived from [yunlingz/ci_dark's iTerm palette](https://github.com/yunlingz/ci_dark/blob/master/term/ci_dark.itermcolors). Original palette colors are retained in `vars`, with the accents used directly. UI neutrals are lightly desaturated so Pi's 256-color conversion keeps charcoal panels and gray text neutral instead of introducing teal casts.
+[ci_dark.json](ci_dark.json) uses the original [iTerm palette](https://github.com/yunlingz/ci_dark/blob/master/term/ci_dark.itermcolors).
+Its background is `#24292e`, foreground `#f6f8fa`, and accents use the source RGB values.
+Derived dark panels and neutral metadata preserve readable contrast in truecolor and 256-color modes.
 
-| Source color | RGB |
-|---|---|
-| Background | `#24292e` |
-| Foreground | `#f6f8fa` |
-| Panels / cursor guide | `#2f363d` |
-| Selection | `#545f6b` |
-| Muted gray | `#959da5` |
-| Green / primary accent | `#85e89d` |
-| Blue / links and headings | `#79b8ff` |
-| Violet / keywords | `#b392f0` |
-| Cyan / types and inline code | `#73e3ff` |
-| Yellow / warnings and numbers | `#ffea7f` |
-| Red / errors and removed lines | `#f97583` |
+Select `ci_dark` in `/settings` or set `"theme": "ci_dark"` in the active agent directory's settings.
+Pi hot-reloads the selected theme file. Use `/reload` after changing extension code or footer overrides.
 
-The UI selection shade is intentionally darker than the source's terminal selection color so dim tree labels and selection accents remain readable. Secondary text is also checked on running-tool panels, and minimal-thinking indicators use the same neutral metadata palette.
+## Complete terminal surfaces
 
-## Use on Windows, Linux, or macOS
+The local `extensions/ci-dark` adapter supplies explicit default foreground and background colors for Pi's TUI output.
+It fills unstyled editor text, blank regions, and reset-colored text without changing the terminal profile or ANSI palette.
+It also maps Powerline's fixed gray prompt and separator colors to theme roles.
+Explicit syntax colors, tool panels, hyperlinks, cursor controls, and image payloads remain intact.
+The adapter is inactive for other themes and restores the original output transport on shutdown or reload.
 
-Copy `ci_dark.json` into the active agent directory's `themes` folder:
+[The Powerline override](../extensions/powerline-footer/theme.json) replaces fixed model/path colors and high-effort rainbow text with semantic colors.
+No installed package files are modified. Native editor and extension features remain available.
 
-- Windows: `%USERPROFILE%\.pi\agent\themes\ci_dark.json`
-- Linux and macOS: `~/.pi/agent/themes/ci_dark.json`
-- If `PI_CODING_AGENT_DIR` is set, use its `themes` folder instead.
+Pi's application theme does not control Windows Terminal tabs/settings, terminal selection, hardware cursor color, or browser review pages.
+Those interfaces have separate owners. Existing terminal profiles and fonts remain unchanged.
+Truecolor shows exact RGB values; 256-color terminals use Pi's supported approximations.
 
-Select `ci_dark` in `/settings`, or set `"theme": "ci_dark"` in that agent directory's `settings.json`. Run `/reload` after manually changing settings. A fresh Pi session also uses the saved selection. The theme file itself hot-reloads while selected.
+## Verification
 
-The theme has no OS-specific paths, extensions, fonts, or icon requirements. Pi uses exact RGB colors in truecolor terminals and approximates them in 256-color terminals. Leave capability detection automatic; force truecolor only if the entire terminal path supports it. A dark terminal background is recommended.
-
-Pi themes do not set the terminal application's base canvas, cursor, or native scrollback colors. For an exact background match, set the terminal profile's background to `#24292e` separately. This configuration does not change terminal profiles or fonts.
-
-## Tool cards
-
-Pi's native state changes are preserved: neutral while running, muted dark green (`#1b241f`) after success, and dark red (`#301e24`) after failure. Finished cards are only slightly darker than the recommended canvas. Indexed 256-color approximations remain distinct, though the subtle green becomes a darker neutral shade.
-
-## Existing Powerline footer
-
-`../extensions/powerline-footer/theme.json` replaces the footer's fixed model/path colors and rainbow thinking text with Pi semantic color names. It therefore follows `ci_dark` and future theme selections in both color modes. This does not alter the footer preset, segment layout, icons, or cache-rate display. The override is optional on machines without `pi-powerline-footer`.
-
-## Validation
-
-Runtime check from this repository:
+Run from the agent directory:
 
 ```text
 node themes/verify.ts <installed-pi-package-directory>
 ```
 
-This checks the installed schema and native loader, all 56 color roles in truecolor and 256-color modes, text contrast on representative backgrounds, card/canvas separation, native tool-state transitions, neutral fallback shades, and semantic footer colors. It uses only the installed Pi's dependencies; it makes no model or network requests.
-
-For full interactive regression checks, compare Pi's original `system` theme with `ci_dark` under identical terminal colors and dimensions. Use a temporary workspace and a mock provider, but exercise the real `InteractiveMode` and tools rather than only rendering individual cards. Pi's SDK supports an injected `Terminal` for this purpose.
-
-Cover streaming chat/thinking, write/read/edit, shell output and failures, queued follow-ups, structured-question previews, task status, Markdown/diffs, settings/model/tree selectors, transcript search, all thinking levels, compaction, normal quit, and a narrower viewport. Inspect the captured screen colors as well as lifecycle parity; selected tree metadata and secondary text on running cards need separate contrast checks.
-
-Native terminal behavior should still be checked on each target OS. An emulated-terminal run on Windows does not establish native Linux/macOS, font, image-protocol, or every extension integration coverage.
+The check covers all semantic roles, contrast, native tool states, and footer colors in both color modes.
+It also runs actual Pi chat/editor/Powerline rendering against black and white terminal defaults in regular and fullscreen modes.
+Terminal-emulator assertions check explicit backgrounds, editor colors, resize, settings, and shutdown.
+The offline extension workflow includes regressions for resets, RGB channels, split writes, links, images, and transport restoration.
+These checks use installed dependencies without model requests; native Windows/macOS terminal coverage remains separate.

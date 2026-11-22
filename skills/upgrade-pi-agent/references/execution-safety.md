@@ -1,60 +1,68 @@
 # Upgrade execution safety
 
-Apply these rules before Pi or extension installation and recovery.
+Both upgrade skills must load this reference before installation or recovery.
+Global authorization, credential protection, scope, and cleanup rules remain active.
 
-## Use tested paths and checks
+## Registry controls
 
-- **Saved workflows**
-  - Reuse saved checks instead of combining installation and verification in a new helper.
-  - When helper files are necessary, use task-owned files instead of large inline scripts.
-- **Path handling**
-  - Pass discovered paths through arguments or environment variables.
-  - Use `node:path` to derive child paths.
-  - You must not embed Windows backslash paths inside nested shell and JavaScript strings.
-  - Resolve filesystem paths and symlinks before comparing installation identity.
-  - Compare resolved targets, not raw shim text or handwritten escaped strings.
+Use only `https://packagefeedproxy.microsoft.io/npm/` for metadata, installation, downloads, and recovery.
+You must not change unrelated npm configuration, switch registries, disable TLS validation, or run lifecycle scripts.
+Use the existing package manager and installed tools; do not add managers or checking dependencies during upgrades.
 
-## Respect Windows file locks
+Check scoped overrides, artifact URLs, lockfile sources, and `npmCommand` before installation.
+When supported, pass the registry explicitly. If supported overrides cannot enforce these controls, stop the dependent upgrade.
 
-- **Host installation**
-  - You must not replace the Pi installation used by a running Windows Pi process.
-  - Windows can lock loaded native modules and executables, preventing replacement and rollback.
-  - For host upgrades, prepare exact installation and recovery commands for an external terminal.
-  - Before external execution, require all Pi processes using that installation to exit.
-  - A nested Pi process or child installer does not release its parent's locks.
-  - You must not terminate the caller or start a detached installer to bypass this boundary.
-- **Extension installation**
-  - Before Windows extension upgrades, inspect affected packages and shared dependencies for native modules and executables.
-  - When native components may be loaded, require external execution after their owning processes exit.
-  - When safe replacement cannot be established, stop before installation and report the blocker.
+For Pi-managed child package commands, set:
 
-## Run a read-only preflight
+```text
+npm_config_registry=https://packagefeedproxy.microsoft.io/npm/
+npm_config_fetch_retries=0
+npm_config_fetch_timeout=20000
+npm_config_ignore_scripts=true
+```
 
-- **Required scope**
-  - Before mutation, run the exact discovery and ownership checks against the currently installed version.
-  - Exercise any new helper's path comparisons, command arguments, timeout handling, and cleanup before installation.
-  - Keep installation and recovery disabled during this preflight.
-  - When helper code changes, repeat its read-only preflight before using it to change packages.
-- **Procedure**
-  1. Resolve the active executable and its package target.
-  2. Compare that target with the package manager's recorded location.
-  3. Confirm that the reported version matches the installed manifest.
-  4. Run the required baseline checks.
-  5. Confirm that verification preserved settings and stopped owned processes.
-  6. When any preflight check fails, stop before changing packages.
+Yarn Classic requires explicit registry, script, network-timeout, and non-interactive flags.
+Do not assume npm retry settings govern Yarn.
+Use a 30-second metadata limit and a deliberate longer installation limit.
+Keep proxy and credential values out of logs.
 
-## Classify failures before recovery
+## Preflight and paths
 
-- **Verification helper defects**
-  - When a verification helper fails, inspect its failure before changing installed packages.
-  - When the helper is defective, correct it and rerun the original required check.
-  - Preserve the required assertions, target installation, and verification scope.
-  - You must not accept a candidate while required checks remain unresolved.
-- **Installation and compatibility failures**
-  - When installation or a valid required check fails, follow the applicable recovery procedure.
-  - When `EBUSY`, `EPERM`, or cleanup warnings concern native files, stop further package changes.
-  - Report the affected path and require its owning processes to exit before installation or recovery.
-  - You must not repeatedly reinstall, force replacement, or delete staging directories while files remain locked.
-- **User-run recovery**
-  - After user-run recovery, rediscover the executable and rerun required checks.
-  - User confirmation alone does not verify recovery.
+- Reuse saved checks; keep installation separate from verification.
+- Use task-owned helper files rather than large inline programs when helpers are necessary.
+- Pass discovered paths through arguments or environment variables; derive child paths with `node:path`.
+- Resolve symlinks before comparing installation identity.
+- Do not embed Windows backslash paths in nested shell or JavaScript strings.
+
+Before mutation:
+
+1. Resolve the active executable and its package target.
+2. Compare it with the package manager's recorded location.
+3. Confirm the manifest and executable versions agree.
+4. Run baseline checks from [sync-pi-config](../../sync-pi-config/SKILL.md).
+5. Exercise new helpers' path comparisons, arguments, deadlines, and cleanup with mutation disabled.
+6. Confirm settings stayed unchanged and owned checking processes stopped.
+
+Repeat preflight after helper changes. Stop before mutation if any prerequisite fails.
+
+## Windows file locks
+
+- Do not replace a Pi installation while Windows Pi processes still use it.
+- Prepare host upgrades for an external terminal after every owning Pi process exits.
+- A nested installer does not release its parent's native-file locks.
+- Do not terminate the caller or start a detached installer to bypass this boundary.
+- Before extension replacement, inspect affected packages and shared dependencies for native modules or executables.
+- When locks can block replacement, require external execution after owning processes exit.
+
+## Failure classification and recovery
+
+- Inspect helper failures before changing installed packages; correct helpers and rerun their original checks.
+- Preserve assertions, target installation, and required coverage.
+- For actual installation or compatibility failures, use the owning skill's recovery procedure.
+- `EBUSY`, `EPERM`, or native-file cleanup warnings require owning processes to exit before further package changes.
+- Do not repeatedly reinstall, force replacement, or delete staging directories while files remain locked.
+- Reinstallation cannot guarantee reversal of transitive dependency changes or external side effects.
+- Never restore whole-file backups over concurrent edits or copy credentials and session contents into recovery state.
+- After user-run recovery, rediscover the executable and rerun checks; confirmation alone is not verification.
+- Require fresh checks after candidate installation or restoration, as defined by [sync-pi-config](../../sync-pi-config/SKILL.md).
+- When recovery fails, stop without committing and report the prerequisite for private recovery.

@@ -3,10 +3,6 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 // Use the producer's declared type only for controlled JSON, not arbitrary external input.
 export function parseTrustedJson<T>(text: string): T {
   return JSON.parse(text) as T;

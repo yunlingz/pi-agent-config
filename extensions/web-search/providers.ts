@@ -23,12 +23,7 @@ export function responsesWebSearch({ modelAllowList }: SearchSettings["providers
   };
 }
 
-const providers = new Map<string, (settings: SearchSettings) => SearchProvider>([
-  ["responsesWebSearch", (settings) => responsesWebSearch(settings.providers.responsesWebSearch)],
-]);
-
 export function selectSearchProvider(settings: SearchSettings): SearchProvider {
-  const createProvider = providers.get(settings.enableProvider);
-  if (!createProvider) throw new Error("/enableProvider selects an unimplemented search provider.");
-  return createProvider(settings);
+  if (settings.enableProvider !== "responsesWebSearch") throw new Error("/enableProvider selects an unimplemented search provider.");
+  return responsesWebSearch(settings.providers.responsesWebSearch);
 }

@@ -78,7 +78,10 @@ try {
       const skillNames = ["maintain-agent-guidance"];
       for (const skill of skillNames) {
         await mkdir(join(agent, "skills", skill));
-        await copyFile(join(agentDirectory, "skills", skill, "SKILL.md"), join(agent, "skills", skill, "SKILL.md"));
+        const source = variant === "baseline"
+          ? execFileSync("git", ["show", `${baselineRef}:skills/${skill}/SKILL.md`], { cwd: repository, encoding: "utf8", timeout: 10_000 })
+          : await readFile(join(agentDirectory, "skills", skill, "SKILL.md"), "utf8");
+        await writeFile(join(agent, "skills", skill, "SKILL.md"), source);
       }
       await writeFile(join(work, "notes", "AGENTS.md"), "# Notes scope\n\nPreserve the Archived section and the existing heading order.\n");
       await writeFile(join(work, "notes", "status.md"), "# Status\n\n## Archived\nDraft\n\n## Pending\nDraft\n");

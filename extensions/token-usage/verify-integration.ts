@@ -1,18 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
-import type { AgentSession, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import {
-  testUI,
-  type FooterConfigModule,
-  type FooterPresetsModule,
-  type FooterSegmentsModule,
-} from "../../scripts/test-fixtures.ts";
-import { readJson, readPackageInfo, resolveInstalledEntry } from "../../scripts/verification-data.ts";
+import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import { loadFooterFixture, testUI } from "../../scripts/test-fixtures.ts";
+import { readPackageInfo, resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import { STATUS_KEY } from "./token-usage.ts";
 
 const argument = process.argv[2];
@@ -41,7 +35,6 @@ try {
     networkAttempts += 1;
     throw new Error("The token-usage fixture must not use the network");
   };
-  const require = createRequire(pathToFileURL(join(packageDirectory, "package.json")));
   const sdk: typeof import("@earendil-works/pi-coding-agent") = await import(pathToFileURL(join(packageDirectory, "dist/index.js")).href);
   const aiEntry = resolveInstalledEntry("@earendil-works/pi-ai", packageDirectory);
   const ai: typeof import("@earendil-works/pi-ai") = await import(pathToFileURL(aiEntry).href);
@@ -246,34 +239,14 @@ try {
   assert.deepEqual(errors, []);
 
   phase = "checking installed Powerline layout and rendering";
-  assert.equal(existsSync(join(agentDirectory, "extensions/cache-rate")), false);
-  const { createJiti }: typeof import("jiti") = await import(pathToFileURL(require.resolve("jiti")).href);
-  const jiti = createJiti(import.meta.url, {
-    fsCache: join(temporaryDirectory, "jiti-cache"),
-    alias: {
-      "@earendil-works/pi-tui": resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory),
-      "@earendil-works/pi-coding-agent": join(packageDirectory, "dist/index.js"),
-      "@earendil-works/pi-ai": aiEntry,
-    },
-  });
-  const footerDirectory = join(agentDirectory, "npm/node_modules/pi-powerline-footer");
-  const configApi = await jiti.import<FooterConfigModule>(join(footerDirectory, "powerline-config.ts"));
-  const presets = await jiti.import<FooterPresetsModule>(join(footerDirectory, "presets.ts"));
-  const segments = await jiti.import<FooterSegmentsModule>(join(footerDirectory, "segments.ts"));
-  const globalSettings = readJson<ReturnType<SettingsManager["getGlobalSettings"]> & { powerline?: unknown }>(join(agentDirectory, "settings.json"));
-  const config = configApi.parsePowerlineConfig(globalSettings.powerline, Object.keys(presets.PRESETS));
-  assert.deepEqual(config.invalidLayoutSegments, []);
-  assert.deepEqual(config.invalidDisabledSegments, []);
+  const { config, preset, layout, hidden, segments } = await loadFooterFixture(packageDirectory, agentDirectory, temporaryDirectory);
   assert.deepEqual(config.customItems.map((item) => item.id), ["web_search", "token_usage"]);
-  const preset = presets.getPreset(config.preset);
-  const layout = configApi.mergeSegmentsWithCustomItems(preset, config.customItems, config);
   assert.deepEqual(layout.leftSegments, [
     "model", "thinking", "custom:web_search", "shell_mode", "path", "git", "queue",
     "context_pct", "custom:token_usage",
   ]);
   assert.deepEqual(layout.rightSegments, preset.rightSegments);
   assert.deepEqual(layout.secondarySegments, preset.secondarySegments);
-  const hidden = configApi.collectHiddenExtensionStatusKeys(config.customItems);
   assert.ok(hidden.has(STATUS_KEY));
   const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
   const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory)).href);

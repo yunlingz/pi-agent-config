@@ -7,9 +7,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import type { AgentSession, ProviderModelConfig, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { testTUI, testUI, type FooterConfigModule, type FooterPresetsModule, type FooterSegmentsModule } from "../../scripts/test-fixtures.ts";
-import { readJson, readPackageInfo, resolveInstalledEntry } from "../../scripts/verification-data.ts";
+import type { AgentSession, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import { loadFooterFixture, testTUI, testUI } from "../../scripts/test-fixtures.ts";
+import { readPackageInfo, resolveInstalledEntry } from "../../scripts/verification-data.ts";
 import type { CitationAnnotation, SearchDetails, SearchResult } from "./types.ts";
 import type { FixtureEvent, FixtureMessage, FixtureOutput, FixtureToolCall, VerificationPayload } from "./verification-fixtures.ts";
 import { createSearchRenderers } from "./render.ts";
@@ -380,26 +380,8 @@ try {
   const tui: typeof import("@earendil-works/pi-tui") = await import(pathToFileURL(resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory)).href);
   const themeApi: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/theme/theme.js")).href);
   const { ToolExecutionComponent }: typeof import("@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js") = await import(pathToFileURL(join(packageDirectory, "dist/modes/interactive/components/tool-execution.js")).href);
-  const { createJiti }: {
-    createJiti(path: string, options: { fsCache: string; alias: Record<string, string> }): { import<T>(path: string): Promise<T> };
-  } = await import(pathToFileURL(require.resolve("jiti")).href);
-  const jiti = createJiti(import.meta.url, { fsCache: join(temporaryDirectory, "jiti-cache"), alias: {
-    "@earendil-works/pi-tui": resolveInstalledEntry("@earendil-works/pi-tui", packageDirectory),
-    "@earendil-works/pi-coding-agent": join(packageDirectory, "dist/index.js"),
-    "@earendil-works/pi-ai": resolveInstalledEntry("@earendil-works/pi-ai", packageDirectory),
-  } });
-  const footerDirectory = join(agentDirectory, "npm/node_modules/pi-powerline-footer");
-  const configApi = await jiti.import<FooterConfigModule>(join(footerDirectory, "powerline-config.ts"));
-  const presets = await jiti.import<FooterPresetsModule>(join(footerDirectory, "presets.ts"));
-  const segments = await jiti.import<FooterSegmentsModule>(join(footerDirectory, "segments.ts"));
-  const globalSettings = readJson<ReturnType<SettingsManager["getGlobalSettings"]> & { powerline?: unknown }>(join(agentDirectory, "settings.json"));
-  const config = configApi.parsePowerlineConfig(globalSettings.powerline, Object.keys(presets.PRESETS));
-  assert.deepEqual(config.invalidLayoutSegments, []);
-  assert.deepEqual(config.invalidDisabledSegments, []);
-  const preset = presets.getPreset(config.preset);
-  const layout = configApi.mergeSegmentsWithCustomItems(preset, config.customItems, config);
+  const { config, preset, layout, hidden, segments } = await loadFooterFixture(packageDirectory, agentDirectory, temporaryDirectory);
   assert.ok(layout.leftSegments.includes("custom:web_search"));
-  const hidden = configApi.collectHiddenExtensionStatusKeys(config.customItems);
   assert.ok(hidden.has("web-search"));
   const capabilities = tui.getCapabilities();
   const renderers = createSearchRenderers({ ...tui, getMarkdownTheme: themeApi.getMarkdownTheme });

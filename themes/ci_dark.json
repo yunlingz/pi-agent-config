@@ -6,8 +6,6 @@
     "background": "#24292e",
     "foreground": "#f6f8fa",
     "surface": "#2f363d",
-    "selection": "#545f6b",
-    "muted": "#959da5",
     "red": "#f97583",
     "green": "#85e89d",
     "yellow": "#ffea7f",

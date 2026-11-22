@@ -5,7 +5,7 @@ This extension adds `/compact-quit`. It has no event hooks, idle timers, input l
 ## Behavior
 
 `/compact-quit` waits for Pi's current agent work to settle, requests native compaction, then requests graceful shutdown.
-Repeated commands share the pending operation. The command accepts no arguments.
+Repeated commands do not start another pending operation. The command accepts no arguments.
 If Pi reports an empty or already-compacted session, the command exits without another summary request.
 If compaction fails or is cancelled, Pi stays open. Run `/compact-quit` again to retry, or `/quit` to exit normally.
 
@@ -18,7 +18,7 @@ Work submitted after the checkpoint follows Pi's normal queue and shutdown behav
 ## Activation
 
 Pi automatically discovers `index.ts`. Existing sessions need `/reload`; new sessions load the command automatically.
-No runtime installation or build step is required. The former automatic and parallel compaction extensions are removed.
+No runtime installation or build step is required.
 
 ## Verification
 

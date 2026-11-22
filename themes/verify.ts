@@ -3,6 +3,7 @@ import type { ThemeBg, ThemeColor, ThemeToken } from "@earendil-works/pi-coding-
 import type { RgbColor } from "@earendil-works/pi-tui";
 import { testTUI } from "../scripts/test-fixtures.ts";
 import { readJson, readPackageInfo } from "../scripts/verification-data.ts";
+import { verifySurfaces } from "./verify-surfaces.ts";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -153,6 +154,7 @@ try {
     assert.equal(THEME_TOKENS[token].slot, "foreground", "Footer colors must follow Pi foreground roles");
   }
   console.log(`PASS: Powerline colors follow semantic theme roles; installed Pi ${packageInfo.version}`);
+  await verifySurfaces(packageDirectory);
   succeeded = true;
 } finally {
   themeApi?.stopThemeWatcher();

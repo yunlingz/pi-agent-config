@@ -16,7 +16,7 @@ const checks = mode === "offline" ? [
     "extensions/token-usage/token-usage.test.ts",
     "extensions/web-search/web-search.test.ts",
     "scripts/verification-data.test.ts",
-    "scripts/live-verification.test.ts", "skills/sync-pi-config/scripts/verify.test.ts"] },
+    "scripts/live-verification.test.ts", "skills/sync-pi-config/scripts/verify.test.ts", "themes/surfaces.test.ts"] },
   ...["compact-quit/verify-integration.ts", "token-usage/verify-integration.ts", "web-search/verify-integration.ts"]
     .map((script) => ({ name: script, args: [`extensions/${script}`, packageDirectory] })),
   { name: "native tools", args: ["scripts/verify-native-tools.ts", packageDirectory] },
@@ -33,7 +33,7 @@ try {
     console.log(`START: ${mode}; ${phase}`);
     child = spawn(process.execPath, check.args, {
       cwd: agentDirectory, shell: false, stdio: "inherit",
-      env: { ...process.env, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0" },
+      env: { ...process.env, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PI_TEST_PACKAGE_DIR: packageDirectory },
     });
     const processChild = child;
     const timeout = setTimeout(() => processChild.kill("SIGKILL"), mode === "live" ? 330_000 : 90_000);

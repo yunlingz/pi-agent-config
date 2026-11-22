@@ -23,6 +23,8 @@
 !/licenses/ste/
 !/licenses/ste/LICENSE
 !/extensions/
+!/extensions/ci-dark/
+!/extensions/ci-dark/index.ts
 !/extensions/compact-quit/
 !/extensions/compact-quit/index.ts
 !/extensions/compact-quit/verify-integration.ts
@@ -55,6 +57,9 @@
 !/themes/ci_dark.json
 !/themes/README.md
 !/themes/verify.ts
+!/themes/surfaces.ts
+!/themes/surfaces.test.ts
+!/themes/verify-surfaces.ts
 !/skills/
 !/skills/maintain-agent-guidance/
 !/skills/maintain-agent-guidance/SKILL.md

@@ -23,7 +23,6 @@ export async function createLiveSession(options: {
   modelOverride?: string;
   extensionFactories?: ExtensionFactory[];
   appendSystemPrompt?: string[];
-  includeBuiltinTools?: boolean;
 }) {
   process.env.PI_OFFLINE = "1";
   process.env.PI_SKIP_VERSION_CHECK = "1";
@@ -70,7 +69,7 @@ export async function createLiveSession(options: {
   const manager = sdk.SessionManager.create(cwd, join(cwd, "sessions"));
   const { session } = await sdk.createAgentSession({
     cwd, agentDir: agentDirectory, settingsManager: settings, modelRuntime: runtime,
-    model, resourceLoader: loader, sessionManager: manager, tools: options.includeBuiltinTools ? undefined : [],
+    model, resourceLoader: loader, sessionManager: manager, tools: [],
   });
   return { sdk, settings, runtime, loader, manager, session };
 }
@@ -83,13 +82,5 @@ export async function closeLiveSession(session: AgentSession) {
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
   } finally {
     session.dispose();
-  }
-}
-
-export async function waitForVerification(predicate: () => boolean, label: string, timeoutMs = 90_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    assert(Date.now() < deadline, `Timed out waiting for ${label}`);
-    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
 }
